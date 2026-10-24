@@ -9,7 +9,7 @@ import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans,
 import {COLLS} from './state.js';
 import {pad, canon, isISO, fmtDate} from './util.js';
 
-export const APP_VERSION = '1.0.1';
+export const APP_VERSION = '1.0.2';
 export const V8_LOCAL_KEY = 'wh-garage-local';
 const MAX_JSON = 60 * 1024 * 1024;
 const enc = new TextEncoder();

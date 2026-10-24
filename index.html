@@ -64,8 +64,19 @@
         <div class="card-h"><h2>Schnell-Eintrag</h2><span class="tag">ohne Internet</span></div>
         <form id="quickForm" class="stack">
           <label for="quickText" class="hint plain">Schreib oder diktier, was du gemacht hast. Zum Diktieren tippst du aufs Mikrofon deiner Tastatur.</label>
-          <textarea id="quickText" rows="3" placeholder="z. B. Öl und Luftfilter gewechselt bei 42 Stunden, 30 Euro"></textarea>
+          <textarea id="quickText" rows="3" placeholder="z. B. Öl und Luftfilter gewechselt bei 42 Stunden, 30 Euro · Mangel: Kette locker · Stand: 45"></textarea>
           <div class="row"><button class="btn primary" id="quickBtn" type="submit">Auswerten</button></div>
+          <details class="qhelp"><summary>Stichwörter</summary>
+            <p class="hint">Ein Stichwort am Anfang legt fest, wo der Eintrag landet (mit oder ohne Doppelpunkt, auch nach dem Motorradnamen):</p>
+            <ul class="hint qlist">
+              <li><b>Mangel:</b> Kette locker → neuer offener Mangel (auch „Mängel“, „Defekt“, „Problem“, „Aufgabe“). „dringend“ macht ihn hoch, „irgendwann“ niedrig.</li>
+              <li><b>Stand:</b> 45 → abgelesener Stand (auch „Zählerstand“, „Kilometerstand“, „Betriebsstunden“)</li>
+              <li><b>Gekauft:</b> 2 Ölfilter, 1 Zündkerze → Teilevorrat erhöhen</li>
+              <li><b>Kaufen:</b> Bremsbeläge vorn → auf die Einkaufsliste (Teil wird als knapp markiert; auch „Bestellen“)</li>
+              <li><b>Notiz:</b>, <b>Fahrt:</b>, <b>Wartung:</b> → genau diese Art</li>
+            </ul>
+            <p class="hint">Ohne Stichwort: Wörter wie „locker“, „undicht“, „quietscht“, „kaputt“ werden ein Mangel. „Kette spannen“ ohne „gespannt“ ist ein offener Punkt, kein erledigter Service.</p>
+          </details>
         </form>
         <div id="quickOut"></div>
       </div>
@@ -279,7 +290,8 @@
       <p><b>Stand unbekannt:</b> Fehlt für einen Wartungspunkt der Stand oder das Datum der letzten Arbeit, zeigt Racebook „Stand unbekannt“ statt einer Restzeit. Trag die letzte Arbeit über „Erledigt“ ein.</p>
       <p><b>Löschen:</b> Wenn du eine Wartung oder Fahrt löschst, rechnet die App Fälligkeit und Stand neu, als hätte es sie nie gegeben. Ein später abgelesener Stand bleibt dabei gültig.</p>
       <p><b>Mängel:</b> Halte fest, was dir auffällt, mit Priorität und Fotos. Beim Erledigen kannst du die Reparatur gleich ins Logbuch eintragen.</p>
-      <p><b>Schnell-Eintrag:</b> Schreib oder diktier, was du gemacht hast. Die Erkennung läuft auf dem Gerät, ohne Internet und ohne KI. Vor dem Speichern siehst du, was erkannt wurde.</p>
+      <p><b>Schnell-Eintrag:</b> Schreib oder diktier, was du gemacht hast. Die Erkennung läuft auf dem Gerät, ohne Internet und ohne KI. Vor dem Speichern siehst du, was erkannt wurde. Stichwörter am Anfang legen fest, wo der Eintrag landet: „Mangel:“, „Stand:“, „Gekauft:“, „Kaufen:“, „Notiz:“, „Fahrt:“, „Wartung:“. Die Liste steht unter dem Eingabefeld bei „Stichwörter“.</p>
+      <p><b>Nur einmal öffnen:</b> Lass Racebook nur an einer Stelle offen, also entweder als installierte App oder im Browser. Ein vergessener Tab in Chrome kann den Speicher blockieren; dann dauert Speichern ungewöhnlich lange und Racebook weist darauf hin.</p>
       <p><b>Vorlagen:</b> Die Wartungsvorlagen sind allgemeine Richtwerte, keine Herstellerangaben. Die Werte für dein Modell stehen in deiner Bedienungsanleitung.</p>
       <p><b>Einspielen und mehrere Fenster:</b> Spielst du eine Sicherung ein oder holst die Sicherheitskopie zurück, wartet Racebook, bis gerade laufende Speichervorgänge fertig sind; sie landen damit noch im bisherigen Stand und in der Sicherheitskopie. Danach werden offene Eingaben geschlossen, auch in anderen geöffneten Racebook-Fenstern, weil sie zum vorherigen Stand gehören. Was ein anderes Fenster noch für den alten Stand speichern wollte, wird abgewiesen und dort gemeldet.</p>
       <p><b>Speicher und Sicherung:</b> Alles liegt nur in diesem Browser auf diesem Gerät. Erstelle unter „Daten &amp; Sicherung“ regelmäßig eine Sicherung und bewahre sie außerhalb des Handys auf.</p>

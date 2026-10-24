@@ -1,4 +1,4 @@
-# Racebook – eigenständige App (PWA), Version 1.0.1
+# Racebook – eigenständige App (PWA), Version 1.0.2
 
 Racebook ist ein Wartungsheft für Motorräder: Wartung und Fälligkeiten, Logbuch, Fahrten, Fahrwerk-Setups, Teilevorrat, Mängel, Fotos und Bedienungsanleitung. Diese Fassung läuft als installierbare Web-App (PWA) im Browser, speichert alles **nur auf dem Gerät** (IndexedDB) und funktioniert nach dem ersten Laden auch ohne Netz.
 
@@ -51,7 +51,7 @@ Andere Anbieter (Cloudflare Pages, eigener Webspace mit HTTPS) gehen genauso. De
 
 1. Die HTTPS-Adresse in **Chrome** auf dem Pixel öffnen und einmal vollständig laden lassen.
 2. Chrome-Menü (⋮) → **„App installieren“** (bei manchen Versionen „Zum Startbildschirm hinzufügen“ → „Installieren“).
-3. Racebook erscheint mit eigenem Symbol im App-Drawer und auf dem Startbildschirm und öffnet ohne Browserleiste.
+3. Racebook erscheint mit eigenem Symbol im App-Drawer und auf dem Startbildschirm und öffnet ohne Browserleiste. **Schließ danach den Chrome-Tab mit Racebook.** Ist die App zweimal offen, kann ein still gelegter Tab im Hintergrund den Speicher blockieren; Speichern dauert dann ungewöhnlich lange, und Racebook zeigt nach etwa 4 Sekunden einen Hinweis darauf.
 4. In Racebook unter **Daten & Sicherung → Speicher** prüfen, ob „Dauerhaft“ auf „Ja“ steht. Wenn nicht: „Dauerhaft speichern“ antippen. Bei installierten Apps gewährt Chrome das meist; dann löscht der Browser die Daten nicht von selbst bei Speicherknappheit.
 5. Offline-Test: Flugmodus an, Racebook öffnen. Die Übersicht, Fotos und gespeicherte PDFs müssen erscheinen.
 
@@ -129,13 +129,33 @@ tests/                automatische Tests: nicht im App-ZIP, sondern im Test-ZIP 
 
 Keine externen Bibliotheken, keine Schriftarten aus dem Netz, keine Verbindung zu fremden Servern. Die Texterkennung im Schnell-Eintrag läuft auf dem Gerät; eine KI ist in dieser Fassung nicht eingebaut.
 
-## 8. Mehrere Fenster
+## 8. Schnell-Eintrag
+
+Schreib oder diktier unter Status, was du gemacht hast. Vor dem Speichern zeigt eine Vorschau, was erkannt wurde; „Bearbeiten“ öffnet das passende Formular. Die Erkennung läuft auf dem Gerät, ohne Internet und ohne KI.
+
+Ein **Stichwort am Anfang** (auch nach dem Motorradnamen, mit oder ohne Doppelpunkt) legt fest, wo der Eintrag landet:
+
+| Stichwort | Ergebnis | Beispiel |
+|---|---|---|
+| Mangel, Mängel, Defekt, Problem, Aufgabe, Todo, Offen | offener Mangel; „dringend“/„sofort“ → hoch, „irgendwann“/„kein Stress“ → niedrig | `Mangel: Kette locker` |
+| Stand, Zählerstand, Kilometerstand, Betriebsstunden, Tacho | abgelesener Stand (niedriger als berechnet = Korrektur, steht in der Vorschau) | `Stand: 45,5` |
+| Gekauft, Eingekauft, Vorrat | Teilevorrat erhöhen, neues Teil anlegen | `Gekauft: 2 Ölfilter, 1 Zündkerze` |
+| Kaufen, Bestellen, Einkauf, Einkaufsliste, Besorgen | Teil als knapp markieren bzw. mit 0 Stück anlegen | `Kaufen: Bremsbeläge vorn` |
+| Notiz, Info, Merken | Notiz | `Notiz: neue Griffe montiert` |
+| Fahrt, Training | Fahrt | `Fahrt: 1,5 h Gotha` |
+| Wartung, Service, Erledigt | Wartung | `Wartung: Luftfilter` |
+
+**Ohne Stichwort:** Wörter wie „locker“, „undicht“, „quietscht“, „schwitzt“, „kaputt“, „funktioniert nicht“ ergeben einen Mangel, solange kein Erledigt-Wort wie „gespannt“ oder „getauscht“ dabeisteht. „Kette spannen“ (Grundform, ohne Erledigt-Wort) ist ein offener Punkt und wird ein Mangel, kein erledigter Service. „2 Stunden gefahren, Gabel schwitzt“ ergibt eine Fahrt und einen Mangel. Verneintes („Öl noch nicht gewechselt“) bleibt eine Notiz.
+
+## 9. Mehrere Fenster
 
 Racebook darf in mehreren Tabs oder Fenstern desselben Browsers offen sein. Änderungen erscheinen in den anderen ohne Neuladen. Zwei Regeln schützen den Bestand, unabhängig davon, ob die Fenster voneinander erfahren:
 
 - **Bestandskennung:** Jeder gespeicherte Bestand hat eine Kennung, die sich bei jedem Einspielen und Wiederherstellen ändert. Jeder Speichervorgang nennt die Kennung des Bestands, in dem er begonnen wurde. Stimmt sie nicht mehr, schreibt der Speicher nichts (geprüft in derselben Transaktion).
 - **Motorrad vorhanden:** Ein Eintrag, der zu einem Motorrad gehört, wird nur gespeichert, wenn es das Motorrad im Speicher gibt (ebenfalls in derselben Transaktion). Ein Motorrad wird mit allen tatsächlich gespeicherten Einträgen entfernt, auch mit solchen, die das Fenster noch nicht kennt.
 
-## 9. Grenzen dieser Fassung
+Racebook möglichst nur an einer Stelle offen halten (installierte App oder Browser). Hängt ein Speichervorgang länger als etwa 4 Sekunden, zeigt Racebook einen Hinweis, dass vermutlich ein anderes Fenster den Speicher blockiert.
+
+## 10. Grenzen dieser Fassung
 
 Siehe `Racebook-PWA-Ueberblick.md` (Änderungen, Grenzen, nächste Schritte) und den Testbericht im Test-ZIP (`tests/TESTBERICHT.md`).

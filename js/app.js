@@ -71,6 +71,7 @@ function renderSys(){
   const el = $('#sysMsg'), parts = [];
   if (S.update) parts.push('<p><b>Eine neue Version von Racebook ist bereit.</b> Deine Daten bleiben dabei erhalten.</p><button class="mini" type="button" id="updateBtn">Jetzt aktualisieren</button>');
   if (S.otherTab) parts.push('<p><b>Racebook wurde in einem anderen Fenster aktualisiert.</b> Lade diese Seite neu, bevor du weiter einträgst.</p><button class="mini" type="button" id="reloadBtn">Neu laden</button>');
+  if (S.slowWrite) parts.push('<p><b>Speichern dauert ungewöhnlich lange.</b> Vermutlich ist Racebook noch in einem anderen Tab oder Fenster offen, zum Beispiel in Chrome, und blockiert den Speicher. Schließ Racebook dort, dann geht es hier von selbst weiter.</p>');
   if (S.blocked) parts.push('<p><b>Racebook wird aktualisiert.</b> Bitte schließ andere geöffnete Racebook-Fenster oder -Tabs, dann geht es weiter.</p>');
   if (S.replaced) parts.push('<p><b>Die Daten wurden in einem anderen Fenster ersetzt</b> (' + (S.replaced.how || 'Sicherung eingespielt oder Sicherheitskopie zurückgeholt') + '). Du siehst jetzt den neuen Stand.'
     + (S.replaced.drafts ? ' Offene Eingaben in diesem Fenster wurden geschlossen, weil sie zum vorherigen Stand gehörten.' : '') + (S.replaced.unres ? ' Ungeklärte Speicherversuche des vorherigen Stands sind damit hinfällig.' : '') + '</p><button class="mini" type="button" id="replacedOk">Verstanden</button>');
@@ -129,6 +130,8 @@ function onDatasetChange(phase){
   renderSys();
 }
 store.onEpochChange(onDatasetChange);
+let slowN = 0;
+store.onSlowWrite(on => { slowN = Math.max(0, slowN + (on ? 1 : -1)); S.slowWrite = slowN > 0; renderSys(); });
 
 function renderAll(){
   derive();

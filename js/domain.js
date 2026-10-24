@@ -365,22 +365,12 @@ export const DONE_RE = /(gewechselt|getauscht|gemacht|repariert|eingebaut|erneue
 export const NEG_RE = new RegExp(B + '(nicht|kein|keine|keinen|keiner|nie|noch nicht)' + E);
 export const PLAN_RE = new RegExp(B + '(muss|müsste|muesste|sollte|sollten|bald|demnächst|demnaechst|morgen|übermorgen|geplant|planen|vorhaben|bestellen|erinnere|erinnern)' + E + '|nächste woche|naechste woche');
 
-export function localParse(text){
+/* Wartung, Fahrt und Notiz aus einem Text (unverändert aus Version 8). ctx: Motorrad und Datum aus dem ganzen Text.
+   opts.keepNeg: Verneinung/Planung nicht als Notiz abfangen (bei ausdrücklichem Stichwort) */
+function coreParse(text, ctx, opts){
+  opts = opts || {};
   const t = ' ' + text.toLowerCase() + ' ';
-  let bike = S.bike;
-  const named = bikeList().filter(x => {
-    const words = [x.brand, x.short, shortName(x), x.model].filter(Boolean).map(w => String(w).toLowerCase());
-    if (String(x.brand || '').toLowerCase() === 'ktm') words.push('exc', 'katie');
-    if (String(x.brand || '').toLowerCase() === 'husqvarna') words.push('husi', 'husq', 'fc');
-    return words.some(w => new RegExp(B + reEsc(w) + E).test(t));
-  });
-  if (named.length) bike = named[0].id;
-  const b = S.bikes[bike] || curBike(); bike = b.id;
-  const lim = LIM[U(b)];
-  let date = todayISO();
-  if (/vorgestern/.test(t)) date = shiftDate(-2); else if (/gestern/.test(t)) date = shiftDate(-1);
-  const dm = t.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})?/);
-  if (dm) { let y = dm[3] ? +dm[3] : new Date().getFullYear(); if (y < 100) y += 2000; const iso = y + '-' + pad(+dm[2]) + '-' + pad(+dm[1]); if (isISO(iso) && iso <= todayISO()) date = iso; }
+  const b = ctx.b, bike = b.id, lim = LIM[U(b)], date = ctx.date;
   const problems = [];
   let cost = null;
   const cre = new RegExp(B + NUM_TOK + '\\s*(?:€|euro|eur)' + E + '|€\\s*' + NUM_TOK, 'g');
@@ -407,7 +397,7 @@ export function localParse(text){
   });
   const base = {bike, date, at: null, amount: null, tasks: [], extra: '', cost: null, track: null, note: text.trim()};
   /* Verneint oder geplant: nichts als erledigt behaupten */
-  if (NEG_RE.test(t) || PLAN_RE.test(t)) {
+  if (!opts.keepNeg && (NEG_RE.test(t) || PLAN_RE.test(t))) {
     return {entries: [Object.assign({}, base, {kind: 'note'})], warn: 'Das klingt nach etwas, das noch nicht erledigt ist. Ich schlage es deshalb nur als Notiz vor.'};
   }
   const iRide = t.search(RIDE_RE), iDone = t.search(DONE_RE);
@@ -439,6 +429,184 @@ export function localParse(text){
   if (entries.some(x => x.kind === 'ride' && x.amount == null)) warn.push('Bei der Fahrt fehlt eine gültige Fahrzeit.');
   return {entries, warn: warn.join(' ')};
 }
+
+/* ---------- Schnell-Eintrag: Stichwörter, Mängel, offene Punkte, Stand, Teile ----------
+   Am Anfang (nach einem Motorradnamen) bestimmt ein Stichwort die Art, mit oder ohne Doppelpunkt:
+     Mangel/Mängel/Defekt/Problem/Aufgabe/Todo → Mangel   Stand/Zählerstand/Kilometerstand → Ablesung
+     Gekauft/Vorrat → Teilevorrat erhöhen                  Kaufen/Bestellen/Einkauf → Teil als knapp markieren
+     Notiz → Notiz   Fahrt/Training → Fahrt   Wartung/Service/Erledigt → Wartung
+   Ohne Stichwort: Schadenswörter (locker, undicht, quietscht …) ohne Erledigt-Wort → Mangel;
+   ein Wartungspunkt mit Verb in der Grundform ohne Erledigt-Wort („Kette spannen“) → offener Mangel. */
+export const QUICK_CMDS = [
+  ['defect', ['mängel', 'maengel', 'mangel', 'defekt', 'problem', 'todo', 'to-do', 'aufgabe', 'offen']],
+  ['reading', ['zählerstand', 'zaehlerstand', 'kilometerstand', 'km-stand', 'betriebsstunden', 'stand', 'tacho']],
+  ['bought', ['gekauft', 'eingekauft', 'vorrat']],
+  ['buy', ['einkaufsliste', 'einkaufen', 'einkauf', 'kaufen', 'bestellen', 'besorgen']],
+  ['note', ['notiz', 'info', 'merken']],
+  ['ride', ['fahrt', 'training']],
+  ['service', ['wartung', 'service', 'erledigt']]
+];
+export const DEFECT_RE = new RegExp(B + '(mängel|maengel|mangel|defekt|kaputt|locker|undicht|leckt|leck' + E + '|tropft|sifft|schwitzt|verbogen|gerissen|gebrochen|abgebrochen|klappert|quietscht|schleift|rasselt|rattert|ölverlust|oelverlust|verschlissen|abgenutzt|rissig|porös|poroes|schwammig|hakt|klemmt|wackelt|ausgefallen|fehlt|beschädigt|beschaedigt|delle' + E + '|riss' + E + '|hat spiel|spiel (?:im|am|in)|geht nicht|funktioniert nicht|springt nicht an|zieht nicht|bremst schlecht|rutscht|ruckelt|stottert|vibriert|qualmt|raucht|verliert|geht aus|säuft ab|saeuft ab|nimmt kein gas|zieht schlecht)');
+export const TODO_RE = new RegExp(B + '(spannen|wechseln|tauschen|austauschen|ersetzen|prüfen|pruefen|kontrollieren|checken|reinigen|sauber machen|schmieren|ölen|oelen|fetten|nachfüllen|nachfuellen|einstellen|entlüften|entlueften|reparieren|richten|erneuern|einbauen|nachziehen|anziehen|machen)' + E);
+const PRIO_HIGH_RE = new RegExp(B + '(dringend|sofort|gefährlich|gefaehrlich|wichtig|sicherheit)');
+const PRIO_LOW_RE = new RegExp(B + '(irgendwann|später|spaeter|kein stress|nicht eilig|kosmetisch|optisch)');
+const KIND_TEXT = {defect: 'Mangel', reading: 'Stand', bought: 'Teilevorrat', buy: 'Einkaufsliste', note: 'Notiz', ride: 'Fahrt', service: 'Wartung'};
+const lc = s => ' ' + String(s).toLowerCase() + ' ';
+const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+
+function bikeWords(x){
+  const w = [x.brand, x.short, shortName(x), x.model].filter(Boolean).map(v => String(v).toLowerCase());
+  if (String(x.brand || '').toLowerCase() === 'ktm') w.push('exc', 'katie');
+  if (String(x.brand || '').toLowerCase() === 'husqvarna') w.push('husi', 'husq', 'fc');
+  return w;
+}
+/* Motorrad und Datum aus dem ganzen Text */
+function parseCtx(text){
+  const t = lc(text);
+  let bike = S.bike;
+  const named = bikeList().filter(x => bikeWords(x).some(w => new RegExp(B + reEsc(w) + E).test(t)));
+  if (named.length) bike = named[0].id;
+  const b = S.bikes[bike] || curBike();
+  let date = todayISO();
+  if (/vorgestern/.test(t)) date = shiftDate(-2); else if (/gestern/.test(t)) date = shiftDate(-1);
+  const dm = t.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})?/);
+  if (dm) { let y = dm[3] ? +dm[3] : new Date().getFullYear(); if (y < 100) y += 2000; const iso = y + '-' + pad(+dm[2]) + '-' + pad(+dm[1]); if (isISO(iso) && iso <= todayISO()) date = iso; }
+  const words = Array.from(new Set(bikeList().flatMap(bikeWords))).sort((a, c) => c.length - a.length);
+  return {b, date, named: named.length > 0, words};
+}
+/* Motorradnamen, Datumswörter und Satzzeichen am Anfang entfernen */
+function stripLead(s, ctx){
+  let x = String(s).trim(), prev;
+  do {
+    prev = x;
+    x = x.replace(/^[\s:;,.\-–—]+/, '');
+    for (const w of ctx.words) { const m = x.match(new RegExp('^' + reEsc(w) + E, 'i')); if (m) { x = x.slice(m[0].length); break; } }
+    x = x.replace(/^(heute|gestern|vorgestern)(?![\wäöüß])/i, '');
+  } while (x !== prev);
+  return x.trim();
+}
+/* Stichwort am Anfang? → {kind, rest} */
+function quickCommand(text, ctx){
+  const x = stripLead(text, ctx), low = x.toLowerCase();
+  for (const [kind, ws] of QUICK_CMDS) {
+    for (const w of ws) {
+      if (low.startsWith(w) && !/[\wäöüß]/.test(low.charAt(w.length) || ' ')) {
+        let rest = x.slice(w.length).replace(/^\s*[:\-–—]?\s*/, '');
+        return {kind, rest: stripLead(rest, ctx)};
+      }
+    }
+  }
+  return null;
+}
+function priorityOf(text){ const t = lc(text); return PRIO_HIGH_RE.test(t) ? 'high' : PRIO_LOW_RE.test(t) ? 'low' : 'mid'; }
+function defectEntry(clause, ctx, full, extraDesc){
+  /* Prioritätswörter bestimmen die Priorität und bleiben nicht im Titel */
+  let title = cap(stripLead(clause, ctx).replace(/[\s,;:]*(dringend|sofort|wichtig|irgendwann|später|spaeter|kein stress|nicht eilig)[\s.!]*$/i, '').replace(/[\s.,;:!?]+$/, ''));
+  let description = extraDesc || '';
+  if (title.length > 120) { const cut = title.lastIndexOf(' ', 117); description = (title + (description ? '\n' + description : '')); title = title.slice(0, cut > 40 ? cut : 117) + ' …'; }
+  return {kind: 'defect', bike: ctx.b.id, date: ctx.date, title, description, priority: priorityOf(full), note: full.trim()};
+}
+/* Teile aus „2 Ölfilter, 1 Zündkerze“ */
+function partItems(rest){
+  return rest.split(/\s*(?:[,;]|\s(?:und|sowie)\s)\s*/i).map(s => s.trim()).filter(Boolean).map(s => {
+    let qty = null, name = s;
+    const m = s.match(new RegExp('^' + NUM_TOK + '\\s*(?:x|×|stück|stueck|stk\\.?|mal)?\\s+(.+)$', 'i')) || null;
+    const m2 = !m && s.match(new RegExp('^(.+?)\\s+' + NUM_TOK + '\\s*(?:x|×|stück|stueck|stk\\.?)?$', 'i'));
+    if (m) { const r = tokNum(m[1]); if (r.ok) { qty = r.value; name = m[2]; } }
+    else if (m2) { const r = tokNum(m2[2]); if (r.ok) { qty = r.value; name = m2[1]; } }
+    return {name: cap(name.replace(/[\s.,;:!?]+$/, '').trim()).slice(0, 120), qty};
+  }).filter(p => p.name);
+}
+const normName = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+function partEntries(kind, rest, ctx){
+  const out = [], notes = [];
+  partItems(rest).forEach(it => {
+    const n = it.qty;
+    if (n != null && (!Number.isInteger(n) || n < 0 || n > 99999)) { notes.push('Die Anzahl bei „' + it.name + '“ ist unklar'); return; }
+    const ex = S.parts.find(p => normName(p.name) === normName(it.name) && (p.bike === 'both' || p.bike === ctx.b.id));
+    const base = {kind: 'part', mode: kind, bike: ctx.b.id, date: ctx.date, name: ex ? ex.name : it.name, partId: ex ? ex.id : '', count: n == null ? (kind === 'bought' ? 1 : 0) : n};
+    if (kind === 'bought') out.push(Object.assign(base, ex ? {before: ex.qty, after: Math.min(99999, ex.qty + base.count), min: ex.min} : {before: null, after: base.count, min: 1}));
+    else if (ex) {
+      if (ex.qty <= ex.min) notes.push('„' + ex.name + '“ ist schon als knapp markiert (' + ex.qty + ' im Vorrat)');
+      else out.push(Object.assign(base, {before: ex.qty, after: ex.qty, min: ex.qty, minBefore: ex.min}));
+    } else out.push(Object.assign(base, {before: null, after: 0, min: 1}));
+  });
+  return {out, notes};
+}
+function readingEntry(rest, ctx){
+  const b = ctx.b, lim = LIM[U(b)];
+  const m = lc(rest).match(new RegExp(B + NUM_TOK));
+  const e = {kind: 'reading', bike: b.id, date: ctx.date, at: null};
+  if (!m) return {e, problem: 'Keine Zahl für den Stand gefunden'};
+  const r = tokNum(m[1]);
+  if (!r.ok) return {e, problem: '„' + m[1] + '“ ist als Stand unklar'};
+  if (r.value < 0 || r.value > lim.cnt) return {e, problem: 'Der Stand „' + m[1] + '“ ist nicht möglich'};
+  e.at = r.value;
+  return {e, problem: ''};
+}
+const withBase = (ctx, text) => ({bike: ctx.b.id, date: ctx.date, at: null, amount: null, tasks: [], extra: '', cost: null, track: null, note: text.trim()});
+
+export function localParse(text){
+  const ctx = parseCtx(text);
+  const cmd = quickCommand(text, ctx);
+  if (cmd) {
+    const k = cmd.kind, rest = cmd.rest, warn = [];
+    if (k === 'defect') {
+      const e = defectEntry(rest, ctx, text);
+      if (!e.title) warn.push('Gib dem Mangel einen Titel, z. B. „Mangel: Kette locker“.');
+      return {entries: [e], warn: warn.join(' '), cmd: k};
+    }
+    if (k === 'reading') {
+      const r = readingEntry(rest, ctx);
+      if (r.problem) warn.push(r.problem + '. Tipp auf „Bearbeiten“.');
+      return {entries: [r.e], warn: warn.join(' '), cmd: k};
+    }
+    if (k === 'bought' || k === 'buy') {
+      const r = partEntries(k, rest, ctx);
+      if (!r.out.length && !r.notes.length) warn.push('Kein Teil erkannt, z. B. „' + (k === 'bought' ? 'Gekauft: 2 Ölfilter' : 'Kaufen: Bremsbeläge vorn') + '“.');
+      if (r.notes.length) warn.push(r.notes.join('. ') + '.');
+      return {entries: r.out, warn: warn.join(' '), cmd: k};
+    }
+    if (k === 'note') return {entries: [Object.assign(withBase(ctx, text), {kind: 'note', note: rest || text.trim()})], warn: '', cmd: k};
+    /* Fahrt oder Wartung ausdrücklich: übliche Erkennung, aber nur Einträge dieser Art */
+    const r = coreParse(rest || text, ctx, {keepNeg: true});
+    let es = r.entries.filter(x => x.kind === k);
+    if (!es.length) es = [Object.assign(withBase(ctx, text), k === 'ride' ? {kind: 'ride'} : {kind: 'service', extra: rest || text.trim()})];
+    es.forEach(x => { x.note = text.trim(); });
+    let w = r.warn;
+    if (k === 'ride' && es.some(x => x.amount == null) && !/fehlt eine gültige Fahrzeit/.test(w)) w = (w ? w + ' ' : '') + 'Bei der Fahrt fehlt eine gültige Fahrzeit.';
+    return {entries: es, warn: w, cmd: k};
+  }
+  const t = lc(text);
+  /* Schadenswörter ohne Erledigt-Wort: Mangel. Ein kurzer Nachsatz wie „gespannt“ gehört zum Satz davor. */
+  const raw = text.split(/\s*[,;.!?\n]+\s*|\s+(?:und|aber|sowie)\s+/i).map(c => c.trim()).filter(Boolean);
+  const clauses = [];
+  raw.forEach(c => { const words = c.split(/\s+/).length; if (clauses.length && words <= 2 && DONE_RE.test(lc(c))) clauses[clauses.length - 1] += ', ' + c; else clauses.push(c); });
+  const defects = clauses.filter(c => DEFECT_RE.test(lc(c)) && !DONE_RE.test(lc(c)));
+  if (defects.length) {
+    const others = clauses.filter(c => !defects.includes(c));
+    const entries = [], left = [], warn = [];
+    if (others.length) {
+      const r = coreParse(others.join(', '), ctx, {});
+      r.entries.forEach(x => {
+        if (x.kind === 'ride' && x.amount != null) entries.push(x);
+        else if (x.kind === 'service' && (x.tasks.length || DONE_RE.test(lc(others.join(' '))))) entries.push(x);
+      });
+      if (!entries.length) left.push(...others.map(c => stripLead(c, ctx)).filter(Boolean));
+      else if (r.warn) warn.push(r.warn);
+    }
+    defects.forEach((c, i) => entries.push(defectEntry(c, ctx, text, i === 0 && left.length ? left.join(', ') : '')));
+    warn.push(defects.length > 1 ? 'Ich habe ' + defects.length + ' Mängel erkannt.' : 'Als Mangel erkannt.');
+    if (entries.length > 1) warn.push('Prüf die Einträge; einzelne kannst du entfernen.');
+    return {entries, warn: warn.join(' ')};
+  }
+  /* Wartungspunkt mit Verb in der Grundform, ohne Erledigt-Wort: offener Punkt, nicht erledigt */
+  if (!DONE_RE.test(t) && !RIDE_RE.test(t) && !NEG_RE.test(t) && TODO_RE.test(t)) {
+    return {entries: [defectEntry(text, ctx, text)], warn: 'Das klingt nach etwas, das noch zu tun ist. Ich lege es als offenen Mangel an. Ist es schon erledigt, schreib z. B. „gespannt“ oder „gewechselt“ dazu.'};
+  }
+  return coreParse(text, ctx, {});
+}
+export const quickKindText = k => KIND_TEXT[k] || k;
 /* ---------- Sicherungen prüfen ---------- */
 export const NAMES = {bikes: 'Motorrad', log: 'Logbuch-Eintrag', rides: 'Fahrt', setups: 'Setup', parts: 'Teil', defects: 'Mangel'};
 /* Schlüssel in der Sicherungsdatei (deutsch, wie seit Version 3) */

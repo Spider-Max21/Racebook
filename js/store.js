@@ -22,7 +22,11 @@ const COMMIT_TIMEOUT = 20000;
 const L = {}; COLLS.forEach(k => { L[k] = {}; });
 const pend = {};
 const subs = {};
-let inflightN = 0, epochCb = null;
+let inflightN = 0, epochCb = null, slowCb = null;
+/* Hängt ein Schreibvorgang länger als SLOW_MS, meist weil Racebook noch in einem anderen Tab offen ist und den
+   Speicher blockiert: Hinweis anzeigen (slowCb(true)), nach dem Ende wieder entfernen (slowCb(false)) */
+const SLOW_MS = 4000;
+export function onSlowWrite(cb){ slowCb = cb; }
 /* Laufende Schreibvorgänge in diesem Fenster (für „erst einspielen, wenn nichts mehr gespeichert wird“) */
 export const inflight = () => inflightN;
 export function onEpochChange(cb){ epochCb = cb; }
@@ -106,8 +110,12 @@ const isFinal = e => !!(e && DB.FINAL_CODES.includes(e.code));
    später doch, wird der Bestand nachgeführt. */
 async function run(ops, after, opts){
   const p = DB.commit(ops, opts);
+  let slow = false;
+  const st = setTimeout(() => { slow = true; if (slowCb) slowCb(true); }, (T() && T().slowMs) || SLOW_MS);
+  const endSlow = () => { clearTimeout(st); if (slow && slowCb) slowCb(false); };
   const r = await Promise.race([p.then(res => ({ok: true, res}), e => ({err: DB.mapErr(e)})), wait((T() && T().commitTimeout) || COMMIT_TIMEOUT).then(() => ({timeout: true}))]);
-  if (r.timeout) { p.then(res => { after(true, res); }, () => {}); return {timeout: true}; }
+  if (r.timeout) { p.then(res => { endSlow(); after(true, res); }, () => { endSlow(); }); return {timeout: true}; }
+  endSlow();
   if (r.ok) after(false, r.res);
   /* Abgewiesen, weil der Bestand ersetzt wurde oder das Motorrad fehlt: neu lesen (auch falls die
      Nachricht aus dem anderen Fenster nicht angekommen ist) */

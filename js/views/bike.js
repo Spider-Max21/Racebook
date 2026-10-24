@@ -1,11 +1,11 @@
 /* Racebook – Motorrad-Ansicht: Status, Logbuch, Fahrten, Fahrwerk, Garage, Handbuch, Schnell-Eintrag.
    Aus Version 8 übernommen (geprüfte Abläufe für Vorgänge, Formulargenerationen und Korrekturen);
    neu sind Motorradfoto, Spitzname, lokale Fotos und PDFs sowie atomare Mehrfachänderungen. */
-import {esc, str, fmt, eur, uid, v2, validId, safeUrl, turns, isISO, todayISO, fmtDate, canon, pad} from '../util.js';
+import {esc, str, fmt, eur, uid, v2, validId, safeUrl, turns, isISO, todayISO, fmtDate, canon, pad, subOf} from '../util.js';
 import {S, lsSet, lsJSON, bikeList, curBike, U, bikeName} from '../state.js';
 import {CHECK, GROUNDS, WEATHER, FLUIDS, MONTHS, LIM, MAX_COST, BRANDS, KW, INAMES, TEMPLATES, MODELS, MODEL_TPL, SF,
   brandOf, colorOf, plateOf, shortName, curOf, itemState, pillText, sortedItems, svcAtOf, valueAt, hasSetOn,
-  serviceDoc, rideDoc, noteDoc, snapOf, sigOf, localParse, openDefects, DEFECT_PRIOS, canonDoc} from '../domain.js';
+  serviceDoc, rideDoc, noteDoc, snapOf, sigOf, localParse, quickKindText, openDefects, DEFECT_PRIOS, canonDoc} from '../domain.js';
 import * as store from '../store.js';
 import {opFor, parkOp, execOp, bumpGen, lowCheck, addUnres, BIKE_FORMS, cleanupFiles, payloadFiles, flow} from '../ops.js';
 import {$, $$, toast, errText, arm, VErr, fieldNum, fieldDate, imgTag, hydrate, fileUrl, icon, fmtSize} from '../ui.js';
@@ -36,20 +36,54 @@ export function onQuick(e){
   renderQuick();
 }
 /* Gestartete, ungeklärte Schnell-Einträge weiter abgleichen; nie gesendete oder sicher nicht gespeicherte entfallen */
+/* Bereich eines Schnell-Eintrags */
+const pendColl = x => x.coll || (x.kind === 'ride' ? 'rides' : x.kind === 'defect' ? 'defects' : x.kind === 'part' ? 'parts' : 'log');
 export function parkPendingEntries(list, epoch){
-  (list || []).forEach(x => { if (x.state === 'unclear' && x.payload) addUnres(x.kind === 'ride' ? 'rides' : 'log', x.op, x.payload, x.kind === 'ride' ? 'Fahrt' : (x.kind === 'note' ? 'Notiz' : 'Wartung'), false, epoch); });
+  (list || []).forEach(x => { if (x.state === 'unclear' && x.payload) addUnres(pendColl(x), x.op, x.payload, quickKindText(x.kind === 'part' ? x.mode : x.kind), !!x.patch, epoch); });
+}
+/* Was ein Schnell-Eintrag speichert. Einmal beim ersten Speichern festgelegt (eingefroren). */
+function pendingWrite(b, x){
+  if (x.kind === 'ride') return {coll: 'rides', data: rideDoc(b, x)};
+  if (x.kind === 'service') return {coll: 'log', data: serviceDoc(b, x)};
+  if (x.kind === 'note') return {coll: 'log', data: noteDoc(b, x)};
+  if (x.kind === 'reading') {
+    /* Niedriger als der berechnete Stand an dieser Stelle: die Vorschau hat es als Korrektur angezeigt */
+    const pos = valueAt(b.id, x.date, x.created);
+    return {coll: 'log', data: canonDoc('log', {bike: b.id, kind: 'reading', date: x.date, at: x.at, atAuto: false, correction: pos != null && x.at < pos, tasks: [], taskNames: [], extra: '', cost: null, note: '', created: x.created})};
+  }
+  if (x.kind === 'defect') return {coll: 'defects', data: canonDoc('defects', {bike: b.id, title: x.title, description: x.description || '', date: x.date, priority: x.priority || 'mid', status: 'open', doneDate: null, repairs: 0, repairLogId: '', photos: [], created: x.created})};
+  if (x.kind === 'part') {
+    const ex = x.partId ? S.parts.find(q => q.id === x.partId) : null;
+    if (ex) return {coll: 'parts', id: ex.id, patch: true, data: x.mode === 'bought' ? {qty: Math.min(99999, Math.round(ex.qty || 0) + x.count)} : {min: Math.max(ex.min || 0, Math.round(ex.qty || 0))}};
+    return {coll: 'parts', data: canonDoc('parts', {name: x.name, bike: b.id, qty: x.mode === 'bought' ? x.count : 0, min: 1, created: x.created})};
+  }
+  return null;
+}
+function partText(x){
+  if (x.mode === 'bought') return x.partId ? 'Vorrat ' + fmt(x.before, 0) + ' → ' + fmt(x.after, 0) : 'neu im Vorrat: ' + fmt(x.after, 0) + ' (nachkaufen ab 1)';
+  return x.partId ? 'als knapp markieren (' + fmt(x.before, 0) + ' im Vorrat, nachkaufen ab jetzt ' + fmt(x.min, 0) + ')' : 'neu auf der Einkaufsliste (0 im Vorrat, gilt als knapp)';
 }
 export function renderQuick(){
   const out = $('#quickOut'), p = S.pending;
   if (!out) return;
-  if (!p || !p.entries.length) { out.innerHTML = ''; return; }
-  const kinds = {service: 'Wartung', ride: 'Fahrt', note: 'Notiz'};
+  if (!p || (!p.entries.length && !p.warn)) { out.innerHTML = ''; return; }
+  if (!p.entries.length) { out.innerHTML = '<div class="preview"><div class="kind">So habe ich es verstanden</div><p class="warnbox">' + esc(p.warn) + '</p><p class="pend-src">Dein Text: „' + esc(p.text) + '“</p><div class="row"><button class="btn ghost" type="button" id="qDrop">Schließen</button></div></div>'; return; }
   const multi = p.entries.length > 1;
   const blocks = p.entries.map((x, i) => {
     const b = S.bikes[x.bike]; if (!b) return '';
     const u = U(b), items = b.items || [];
-    const rows = [['Motorrad', bikeName(b)], ['Art', (multi ? (i + 1) + '. ' : '') + kinds[x.kind]], ['Datum', fmtDate(x.date)]];
-    if (x.kind === 'ride') {
+    const rows = [['Motorrad', bikeName(b)], ['Art', (multi ? (i + 1) + '. ' : '') + quickKindText(x.kind === 'part' ? x.mode : x.kind)]];
+    if (x.kind !== 'part') rows.push(['Datum', fmtDate(x.date)]);
+    if (x.kind === 'defect') {
+      rows.push(['Titel', x.title || 'fehlt']);
+      if (x.description) rows.push(['Beschreibung', x.description]);
+      rows.push(['Priorität', prioText(x.priority)], ['Status', 'offen, erscheint unter „Mängel“']);
+    } else if (x.kind === 'reading') {
+      const pos = valueAt(b.id, x.date, Date.now());
+      rows.push(['Stand', x.at == null ? 'fehlt' : fmt(x.at, 2) + ' ' + u + (pos != null && x.at < pos ? ' (niedriger als berechnet: ' + fmt(pos, 2) + ' ' + u + ', gilt als Korrektur)' : '')]);
+    } else if (x.kind === 'part') {
+      rows.push(['Teil', x.name], ['Änderung', partText(x)]);
+    } else if (x.kind === 'ride') {
       rows.push(['Fahrzeit', x.amount == null ? 'fehlt' : fmt(x.amount, 2) + ' ' + u]);
       if (x.track) rows.push(['Strecke', x.track]);
       if (hasSetOn(b.id, x.date)) rows.push(['Hinweis', 'Für diesen Tag gibt es schon einen abgelesenen Stand. Die Fahrt wird dazugezählt. Steckt sie schon darin, tipp auf „Bearbeiten“.']);
@@ -65,8 +99,8 @@ export function renderQuick(){
       rows.push(['Erledigt', x.tasks.length ? '<span class="chips">' + x.tasks.map(id => '<span class="chip static">' + esc((items.find(it => it.id === id) || {}).name || id) + '</span>').join('') + '</span>' : '–', true]);
       if (x.extra) rows.push(['Weiteres', x.extra]);
     } else if (x.at != null) rows.push(['Stand', fmt(x.at, 2) + ' ' + u]);
-    if (x.cost != null) rows.push(['Kosten', eur(x.cost)]);
-    if (x.note && x.note !== p.text) rows.push(['Notiz', x.note]);
+    if (x.cost != null && x.kind !== 'defect' && x.kind !== 'part' && x.kind !== 'reading') rows.push(['Kosten', eur(x.cost)]);
+    if (x.note && x.note !== p.text && x.kind !== 'defect') rows.push(['Notiz', x.note]);
     return '<div class="pend"><dl class="kv">' + rows.map(r => '<dt>' + r[0] + '</dt><dd>' + (r[2] ? r[1] : esc(r[1])) + '</dd>').join('') + '</dl>'
       + '<div class="row"><button class="mini" type="button" data-qedit="' + i + '"' + (p.saving ? ' disabled' : '') + '>Bearbeiten</button>' + (multi ? '<button class="mini" type="button" data-qdrop="' + i + '"' + (p.saving ? ' disabled' : '') + '>Entfernen</button>' : '') + '</div></div>';
   }).join('');
@@ -79,6 +113,8 @@ export function renderQuick(){
 async function commitPending(){
   const p = S.pending; if (!p || p.saving) return;
   if (p.entries.some(e => e.kind === 'ride' && e.amount == null)) { p.warn = 'Bei der Fahrt fehlt eine gültige Fahrzeit. Tipp auf „Bearbeiten“.'; renderQuick(); return; }
+  if (p.entries.some(e => e.kind === 'defect' && !e.title)) { p.warn = 'Dem Mangel fehlt ein Titel. Tipp auf „Bearbeiten“.'; renderQuick(); return; }
+  if (p.entries.some(e => e.kind === 'reading' && e.at == null)) { p.warn = 'Beim Stand fehlt eine gültige Zahl. Tipp auf „Bearbeiten“.'; renderQuick(); return; }
   /* Erfassungszeit in der angezeigten Reihenfolge festlegen, einmal und vor dem ersten Speichern */
   const base = Date.now();
   p.entries.forEach((x, i) => { if (!x.created) x.created = base + i; });
@@ -90,9 +126,9 @@ async function commitPending(){
       for (const x of p.entries.slice()) {
         const b = S.bikes[x.bike]; if (!b) continue;
         /* Nutzdaten einmal einfrieren; eine Wiederholung sendet dieselben Daten unter derselben ID */
-        if (!x.payload) x.payload = x.kind === 'service' ? serviceDoc(b, x) : (x.kind === 'ride' ? rideDoc(b, x) : noteDoc(b, x));
+        if (!x.payload) { const w = pendingWrite(b, x); x.coll = w.coll; x.payload = w.data; x.patch = !!w.patch; if (w.id) x.op = w.id; }
         /* Gehört zum Bestand der Vorschau; wurde er inzwischen ersetzt, weist der Speicher den Eintrag ab */
-        const r = await store.sSetR(x.kind === 'ride' ? 'rides' : 'log', x.op, x.payload, null, {epoch: p.epoch});
+        const r = x.patch ? await store.sUpdateR(x.coll, x.op, x.payload, null, {epoch: p.epoch}) : await store.sSetR(x.coll, x.op, x.payload, null, {epoch: p.epoch});
         x.state = r;
         if (r === 'ok') { ok++; p.entries = p.entries.filter(e => e !== x); } else break;
       }
@@ -106,7 +142,7 @@ async function commitPending(){
   if (!p.entries.length) { S.pending = null; $('#quickText').value = ''; toast(ok > 1 ? ok + ' Einträge gespeichert.' : 'Eingetragen.'); }
   else {
     const unclear = p.entries.some(e => e.state === 'unclear');
-    p.warn = (ok ? ok + ' gespeichert. ' : '') + (unclear ? 'Bei einem Eintrag ist unklar, ob er gespeichert wurde. ' : 'Der Rest wurde nicht gespeichert. ') + 'Tipp nochmal auf „Eintragen“, es entsteht dabei kein doppelter Eintrag.';
+    p.warn = (ok ? ok + ' gespeichert. ' : '') + (unclear ? 'Bei einem Eintrag ist unklar, ob er gespeichert wurde. ' + (S.lastErr && S.lastErr.code === 'timeout' ? 'Der Speicher hat nicht geantwortet. Ist Racebook noch in einem anderen Tab oder Fenster offen, zum Beispiel in Chrome? Schließ es dort. ' : '') : 'Der Rest wurde nicht gespeichert. ') + 'Tipp nochmal auf „Eintragen“, es entsteht dabei kein doppelter Eintrag.';
     toast(unclear ? 'Unklar, ob gespeichert wurde.' : errText(S.lastErr));
   }
   renderQuick();
@@ -117,7 +153,20 @@ function editPending(i){
   if (x.bike !== S.bike) R.setBike(x.bike);
   /* Ein ungeklärter früherer Versuch wird getrennt weiter abgeglichen; die Bearbeitung wird ein neuer Vorgang */
   parkPendingEntries([x], p.epoch);
-  if (x.kind === 'ride') {
+  if (x.kind === 'defect') {
+    if (S.defEdit) R.closeDraft('defectForm');
+    $('#dTitle').value = x.title || ''; $('#dDesc').value = x.description || ''; $('#dDate').value = x.date; $('#dPrio').value = x.priority || 'mid';
+    $('#defectDetails').open = true; setSection('defects', 'defectDetails');
+  } else if (x.kind === 'reading') {
+    const f = $('#hoursForm'); f.hidden = false; f.dataset.bike = x.bike; f.dataset.epoch = S.epoch || ''; delete f.dataset.confirm;
+    $('#hoursHint').hidden = true; $('#hoursSave').textContent = 'Speichern';
+    $('#hoursInput').value = x.at != null ? v2(x.at) : '';
+    setSection('status'); $('#hoursInput').focus();
+  } else if (x.kind === 'part') {
+    $('#pName').value = x.name || ''; $('#pQty').value = String(x.mode === 'bought' ? (x.partId ? x.after : x.count) : 0); $('#pMin').value = '1';
+    const pb = $('#pBike'); if (pb && Array.from(pb.options).some(o => o.value === x.bike)) pb.value = x.bike;
+    const det = $('#partForm').closest('details'); if (det) det.open = true; setSection('garage', 'g-parts');
+  } else if (x.kind === 'ride') {
     $('#rDate').value = x.date; $('#rAmount').value = v2(x.amount);
     $('#rTrack').value = x.track || ''; $('#rNote').value = x.note || '';
     updateRideIn();
@@ -139,7 +188,7 @@ export function reconcilePending(){
   const p = S.pending;
   if (p && !p.saving) {
     const before = p.entries.length;
-    p.entries = p.entries.filter(x => !(S.loaded[x.kind === 'ride' ? 'rides' : 'log'] && S[x.kind === 'ride' ? 'rides' : 'log'].some(d => d.id === x.op && !d._pending)));
+    p.entries = p.entries.filter(x => { const c = pendColl(x); return !(x.payload && S.loaded[c] && S[c].some(d => d.id === x.op && !d._pending && (!x.patch || subOf(x.payload, d)))); });
     if (p.entries.length !== before) { if (!p.entries.length) { S.pending = null; const q = $('#quickText'); if (q) q.value = ''; } toast('Der Eintrag ist gespeichert.'); }
   }
 }

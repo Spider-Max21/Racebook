@@ -60,7 +60,7 @@ export async function execOp(k, o, write){
   else {
     o.state = 'unclear';
     if (S.ops[k] !== o && !o.noTrack) addUnres(o.coll, o.op, o.payload, o.label, o.patch, o.epoch);
-    toast('Unklar, ob gespeichert wurde. Tipp nochmal auf „Eintragen“, dabei entsteht kein doppelter Eintrag.');
+    toast('Unklar, ob gespeichert wurde. ' + (S.lastErr && S.lastErr.code === 'timeout' ? 'Der Speicher hat nicht geantwortet; ist Racebook noch in einem anderen Tab offen? Schließ es dort. ' : '') + 'Tipp nochmal auf „Eintragen“, dabei entsteht kein doppelter Eintrag.');
     /* Eine bestätigte Meldung kann schon während des Speicherns angekommen sein: sofort abgleichen */
     reconcile();
   }
