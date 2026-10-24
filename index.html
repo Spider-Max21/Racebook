@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Racebook</title>
+<meta name="description" content="Wartungsheft für Motorräder: Wartung, Fahrten, Fahrwerk-Setups und Mängel. Alles bleibt auf deinem Gerät.">
+<meta name="theme-color" content="#16191D">
+<meta name="color-scheme" content="dark light">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Racebook">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/app.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body data-page="home">
+<a class="skip" href="#main" data-skip="1">Zum Inhalt springen</a>
+<header class="appbar">
+  <div class="appbar-in">
+    <button class="back" id="backBtn" type="button" aria-label="Zurück" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <a class="brandmark" id="homeLink" href="#/"><img src="icons/emblem.svg" alt="" width="34" height="34"><span>Racebook</span></a>
+    <div class="bar-title" id="barTitle" hidden></div>
+    <button class="bchip" id="backupChip" type="button" hidden></button>
+  </div>
+</header>
+
+<main id="main" class="wrap" tabindex="-1">
+  <div id="sysMsg" class="sysmsg" role="status" hidden></div>
+
+  <!-- ÜBERSICHT -->
+  <section id="v-home" class="view" aria-label="Übersicht">
+    <h1 class="sr">Racebook, Übersicht</h1>
+    <div id="homeBody" class="stack-l"><p class="hint thinking">Garage wird geladen …</p></div>
+  </section>
+
+  <!-- MOTORRAD -->
+  <section id="v-bike" class="view" hidden aria-labelledby="barTitle">
+    <div id="banner" class="banner" hidden></div>
+
+    <section id="v-status" class="sub">
+      <h2 class="sr">Status</h2>
+      <div id="statusPhoto"></div>
+      <div class="card">
+        <div class="hero">
+          <div>
+            <div class="lbl" id="plateLabel">Betriebsstunden</div>
+            <button class="plate" id="plateBtn" type="button"><span id="plateNum">–</span><small id="plateUnit">h</small></button>
+          </div>
+          <div class="hero-meta" id="heroMeta"></div>
+        </div>
+        <form id="hoursForm" class="hours-form" hidden>
+          <label for="hoursInput" class="sr">Neuer Stand</label>
+          <input id="hoursInput" inputmode="decimal" autocomplete="off" placeholder="Neuer Stand, z. B. 42,5">
+          <button class="btn primary" type="submit" id="hoursSave">Speichern</button>
+          <button class="btn ghost" type="button" id="hoursCancel">Abbrechen</button>
+          <p class="warnbox" id="hoursHint" style="flex-basis:100%" hidden></p>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Schnell-Eintrag</h2><span class="tag">ohne Internet</span></div>
+        <form id="quickForm" class="stack">
+          <label for="quickText" class="hint plain">Schreib oder diktier, was du gemacht hast. Zum Diktieren tippst du aufs Mikrofon deiner Tastatur.</label>
+          <textarea id="quickText" rows="3" placeholder="z. B. Öl und Luftfilter gewechselt bei 42 Stunden, 30 Euro"></textarea>
+          <div class="row"><button class="btn primary" id="quickBtn" type="submit">Auswerten</button></div>
+        </form>
+        <div id="quickOut"></div>
+      </div>
+
+      <div class="card" id="c-items">
+        <div class="card-h"><h2>Wartung</h2><button class="link" type="button" data-goto="garage" data-anchor="g-int">Intervalle anpassen</button></div>
+        <div class="items" id="itemList"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Mängel</h2><span class="tag" id="statusDefCount"></span></div>
+        <div id="statusDefects"></div>
+        <div class="row" style="margin-top:10px"><button class="mini" type="button" data-goto="defects" data-anchor="defectDetails" data-open="1">Mangel erfassen</button><button class="mini" type="button" data-goto="defects">Alle Mängel</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Montiert</h2><button class="link" type="button" data-goto="garage" data-anchor="g-tc">Ändern</button></div>
+        <div id="mountSum"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Vor der Fahrt</h2><span class="tag" id="checkCount"></span></div>
+        <div id="checkList"></div>
+        <div class="row" style="margin-top:8px"><button class="btn ghost" type="button" id="checkReset">Alles zurücksetzen</button></div>
+      </div>
+    </section>
+
+    <!-- MÄNGEL -->
+    <section id="v-defects" class="sub" hidden>
+      <h2 class="sr">Mängel</h2>
+      <details class="card form-card" id="defectDetails">
+        <summary><h2 id="defFormTitle">Mangel erfassen</h2></summary>
+        <form id="defectForm" class="grid">
+          <div class="f full"><label for="dTitle">Titel</label><input id="dTitle" maxlength="120" autocomplete="off" placeholder="z. B. Bremshebel hat Spiel"></div>
+          <div class="f full"><label for="dDesc">Beschreibung</label><textarea id="dDesc" rows="3" placeholder="Was ist dir aufgefallen? Wann tritt es auf?"></textarea></div>
+          <div class="f"><label for="dDate">Festgestellt am</label><input type="date" id="dDate"></div>
+          <div class="f"><label for="dPrio">Priorität</label><select id="dPrio"><option value="high">hoch</option><option value="mid" selected>mittel</option><option value="low">niedrig</option></select></div>
+          <div class="f full" id="dPhotoKeep" hidden></div>
+          <div class="f full"><label for="dPhotos">Fotos hinzufügen (optional, bis zu 6)</label><input type="file" id="dPhotos" accept="image/*" multiple></div>
+          <div class="f full row"><button class="btn primary" type="submit" id="dSave">Mangel speichern</button><button class="btn ghost" type="button" id="dCancel" hidden>Abbrechen</button></div>
+        </form>
+      </details>
+      <div class="card"><div class="card-h"><h2>Offen und in Arbeit</h2><span class="tag" id="defOpenCount"></span></div><div id="defOpen" class="defects"></div></div>
+      <div class="card"><div class="card-h"><h2>Erledigt</h2><span class="tag" id="defDoneCount"></span></div><div id="defDoneList" class="defects"></div></div>
+    </section>
+
+    <!-- LOGBUCH -->
+    <section id="v-log" class="sub" hidden>
+      <h2 class="sr">Logbuch</h2>
+      <details class="card form-card" id="logDetails">
+        <summary><h2>Neuer Eintrag</h2></summary>
+        <form id="logForm" class="grid">
+          <div class="f full"><label for="lKind">Art</label><select id="lKind"><option value="service">Wartung (erledigte Arbeit)</option><option value="note">Notiz (nichts erledigt)</option></select></div>
+          <div class="f"><label for="lDate">Datum</label><input type="date" id="lDate"></div>
+          <div class="f"><label for="lAt" id="lAtLabel">Stand (h)</label><input id="lAt" inputmode="decimal" autocomplete="off"></div>
+          <p class="hint full" id="lAtHint" hidden></p>
+          <div class="f full"><span class="lbl" id="lTasksLbl">Erledigt</span><div class="chips" id="lTasks" role="group" aria-labelledby="lTasksLbl"></div></div>
+          <div class="f full"><label for="lExtra">Weitere Arbeiten</label><input id="lExtra" autocomplete="off" placeholder="z. B. Bremsbeläge hinten getauscht"></div>
+          <div class="f"><label for="lCost">Kosten (€)</label><input id="lCost" inputmode="decimal" autocomplete="off"></div>
+          <div class="f" id="lPhotoWrap"><label for="lPhoto">Foto</label><input type="file" id="lPhoto" accept="image/*"></div>
+          <div class="f full"><label for="lNote">Notiz</label><textarea id="lNote" rows="2"></textarea></div>
+          <div class="f full row"><button class="btn primary" type="submit" id="lSave">Eintragen</button></div>
+        </form>
+      </details>
+      <div class="stats" id="logStats"></div>
+      <div class="card">
+        <div class="card-h"><h2>Serviceheft</h2><span class="tag" id="logCount"></span></div>
+        <div id="logList"></div>
+      </div>
+    </section>
+
+    <!-- FAHRTEN -->
+    <section id="v-rides" class="sub" hidden>
+      <h2 class="sr">Fahrten</h2>
+      <div class="card">
+        <div class="card-h"><h2>Fahrzeit pro Monat</h2><span class="tag" id="rideTotal"></span></div>
+        <div class="chart" id="rideChart"></div>
+      </div>
+      <details class="card form-card" id="rideDetails">
+        <summary><h2>Fahrt eintragen</h2></summary>
+        <form id="rideForm" class="grid">
+          <div class="f"><label for="rDate">Datum</label><input type="date" id="rDate"></div>
+          <div class="f"><label for="rAmount" id="rAmountLabel">Fahrzeit (h)</label><input id="rAmount" inputmode="decimal" autocomplete="off"></div>
+          <label class="check full" id="rInWrap" hidden><input type="checkbox" id="rIn"><span>Schon im abgelesenen Stand von diesem Tag enthalten</span></label>
+          <div class="f full"><label for="rTrack">Strecke</label><input id="rTrack" list="trackList" autocomplete="off" placeholder="z. B. MX-Park Gotha"></div>
+          <div class="f"><label for="rGround">Boden</label><select id="rGround"></select></div>
+          <div class="f"><label for="rWeather">Wetter</label><select id="rWeather"></select></div>
+          <div class="f full"><label for="rSetup">Fahrwerks-Setup</label><select id="rSetup"></select></div>
+          <fieldset class="f full plainset"><legend class="lbl">Gefühl</legend><div class="feel" id="rFeel"></div></fieldset>
+          <div class="f full"><label for="rNote">Notiz</label><textarea id="rNote" rows="2" placeholder="Was lief gut, was nicht?"></textarea></div>
+          <div class="f full row"><button class="btn primary" type="submit">Fahrt speichern</button></div>
+        </form>
+      </details>
+      <div class="card">
+        <div class="card-h"><h2>Fahrten</h2><span class="tag" id="rideCount"></span></div>
+        <div id="rideList"></div>
+      </div>
+      <datalist id="trackList"></datalist>
+    </section>
+
+    <!-- FAHRWERK -->
+    <section id="v-setup" class="sub" hidden>
+      <h2 class="sr">Fahrwerk</h2>
+      <details class="card form-card" id="setupDetails">
+        <summary><h2 id="setupFormTitle">Setup speichern</h2></summary>
+        <form id="setupForm" class="stack">
+          <div class="f"><label for="sTrack">Strecke</label><input id="sTrack" list="trackList" autocomplete="off" placeholder="z. B. Hartboden-Enduro, Sandstrecke"></div>
+          <fieldset><legend>Gabel</legend>
+            <div class="grid">
+              <div class="f"><label for="sForkC">Druckstufe (Klicks)</label><input id="sForkC" inputmode="decimal"></div>
+              <div class="f"><label for="sForkR">Zugstufe (Klicks)</label><input id="sForkR" inputmode="decimal"></div>
+              <div class="f"><label for="sForkAir">Luftdruck (bar)</label><input id="sForkAir" inputmode="decimal" placeholder="nur Luftgabel"></div>
+              <div class="f"><label for="sForkPre">Vorspannung</label><input id="sForkPre" inputmode="decimal" placeholder="Umdr. / Stufe"></div>
+            </div>
+          </fieldset>
+          <fieldset><legend>Federbein</legend>
+            <div class="grid">
+              <div class="f"><label for="sHSC">High Speed (Umdr.)</label><input id="sHSC" inputmode="decimal"></div>
+              <div class="f"><label for="sLSC">Low Speed (Klicks)</label><input id="sLSC" inputmode="decimal"></div>
+              <div class="f"><label for="sShockR">Zugstufe (Klicks)</label><input id="sShockR" inputmode="decimal"></div>
+              <div class="f"><label for="sSag">Sag (mm)</label><input id="sSag" inputmode="decimal"></div>
+            </div>
+          </fieldset>
+          <div class="grid">
+            <div class="f"><label for="sPF">Reifendruck vorn (bar)</label><input id="sPF" inputmode="decimal"></div>
+            <div class="f"><label for="sPR">Reifendruck hinten (bar)</label><input id="sPR" inputmode="decimal"></div>
+          </div>
+          <div class="f"><label for="sNote">Notiz</label><textarea id="sNote" rows="2"></textarea></div>
+          <div class="row">
+            <button class="btn primary" type="submit" id="sSave">Setup speichern</button>
+            <button class="btn ghost" type="button" id="sCancel" hidden>Abbrechen</button>
+          </div>
+        </form>
+      </details>
+      <p class="hint">Klicks zählst du vom ganz geschlossenen Anschlag (im Uhrzeigersinn zu) nach außen.</p>
+      <div id="setupList" class="stack"></div>
+    </section>
+
+    <!-- GARAGE -->
+    <section id="v-garage" class="sub" hidden>
+      <h2 class="sr">Garage</h2>
+      <nav class="jump" aria-label="Abschnitte der Garage">
+        <button class="mini" type="button" data-jump="g-bike">Motorrad</button>
+        <button class="mini" type="button" data-jump="g-tc">Reifen &amp; Kette</button>
+        <button class="mini" type="button" data-jump="g-oil">Öle</button>
+        <button class="mini" type="button" data-jump="g-parts">Teile</button>
+        <button class="mini" type="button" data-jump="g-int">Intervalle</button>
+      </nav>
+      <div class="card" id="g-bike">
+        <div class="card-h"><h2>Motorrad</h2><button class="link" type="button" data-edit="bike">Bearbeiten</button></div>
+        <div id="bikeBody"></div>
+      </div>
+      <div class="card" id="g-tc">
+        <div class="card-h"><h2>Reifen &amp; Kette</h2><button class="link" type="button" data-edit="tc">Bearbeiten</button></div>
+        <div id="tcBody"></div>
+      </div>
+      <div class="card" id="g-oil">
+        <div class="card-h"><h2>Öle &amp; Flüssigkeiten</h2><button class="link" type="button" data-edit="oil">Bearbeiten</button></div>
+        <div id="oilBody"></div>
+      </div>
+      <div class="card" id="g-parts">
+        <div class="card-h"><h2>Teilevorrat</h2><span class="tag" id="partsCount"></span></div>
+        <div id="partsBody"></div>
+        <details class="form-card" style="margin-top:10px">
+          <summary><h3>Teil hinzufügen</h3></summary>
+          <form id="partForm" class="grid">
+            <div class="f full"><label for="pName">Teil</label><input id="pName" autocomplete="off" placeholder="z. B. Ölfilter, Zündkerze, Bremsbeläge vorn"></div>
+            <div class="f full"><label for="pBike">Für</label><select id="pBike"></select></div>
+            <div class="f"><label for="pQty">Anzahl</label><input id="pQty" inputmode="numeric" value="1"></div>
+            <div class="f"><label for="pMin">Nachkaufen ab</label><input id="pMin" inputmode="numeric" value="1"></div>
+            <div class="f full row"><button class="btn primary" type="submit">Hinzufügen</button></div>
+          </form>
+        </details>
+      </div>
+      <div class="card" id="g-int">
+        <div class="card-h"><h2>Wartungsintervalle</h2><button class="link" type="button" data-edit="int">Bearbeiten</button></div>
+        <div id="intBody"></div>
+      </div>
+    </section>
+
+    <!-- HANDBUCH -->
+    <section id="v-manual" class="sub" hidden>
+      <h2 class="sr">Handbuch</h2>
+      <div class="card">
+        <div class="card-h"><h2>Bedienungsanleitung</h2></div>
+        <div id="manBody"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Herstellervorgaben</h2><button class="link" type="button" data-edit="oem">Bearbeiten</button></div>
+        <p class="hint" style="margin-bottom:10px">Nur zur schnellen Übersicht. Deine eigenen Intervalle unter Garage bleiben davon unberührt.</p>
+        <div id="oemBody"></div>
+      </div>
+    </section>
+  </section>
+
+  <!-- MOTORRAD HINZUFÜGEN -->
+  <section id="v-add" class="view" hidden aria-label="Motorrad hinzufügen"><div id="addBike"></div></section>
+
+  <!-- DATEN & SICHERUNG -->
+  <section id="v-data" class="view" hidden aria-label="Daten und Sicherung"><div id="dataBody" class="stack-l"></div></section>
+
+  <!-- HILFE -->
+  <section id="v-help" class="view" hidden aria-label="Hilfe">
+    <div class="card help">
+      <h2>So funktioniert Racebook</h2>
+      <p><b>Übersicht:</b> Jede Karte zeigt Stand, nächste Wartung und offene Mängel eines Motorrads. Tipp auf die Karte, um es zu öffnen.</p>
+      <p><b>Stand eintragen:</b> Tipp unter Status auf das Nummernschild.</p>
+      <p><b>Wartung abhaken:</b> Tipp bei einem Wartungspunkt auf „Erledigt“. Datum und Stand kannst du anpassen, auch für Arbeiten, die schon länger her sind. Ohne Stand von damals zählt nur die Frist in Monaten.</p>
+      <p><b>Stand:</b> Ein abgelesener Stand gilt immer, auch wenn er schon mit dem berechneten übereinstimmt. Fahrten werden nach ihrem Datum einsortiert: Eine nachgetragene Fahrt von gestern steckt also schon in einem heute abgelesenen Stand. Bei einer Fahrt vom selben Tag kannst du ankreuzen, ob sie schon im abgelesenen Stand enthalten ist.</p>
+      <p><b>Wartung ohne Stand:</b> Lässt du den Stand leer, ergibt er sich aus dem Verlauf und passt sich an, wenn du zum Beispiel eine frühere Fahrt löschst.</p>
+      <p><b>Stand unbekannt:</b> Fehlt für einen Wartungspunkt der Stand oder das Datum der letzten Arbeit, zeigt Racebook „Stand unbekannt“ statt einer Restzeit. Trag die letzte Arbeit über „Erledigt“ ein.</p>
+      <p><b>Löschen:</b> Wenn du eine Wartung oder Fahrt löschst, rechnet die App Fälligkeit und Stand neu, als hätte es sie nie gegeben. Ein später abgelesener Stand bleibt dabei gültig.</p>
+      <p><b>Mängel:</b> Halte fest, was dir auffällt, mit Priorität und Fotos. Beim Erledigen kannst du die Reparatur gleich ins Logbuch eintragen.</p>
+      <p><b>Schnell-Eintrag:</b> Schreib oder diktier, was du gemacht hast. Die Erkennung läuft auf dem Gerät, ohne Internet und ohne KI. Vor dem Speichern siehst du, was erkannt wurde.</p>
+      <p><b>Vorlagen:</b> Die Wartungsvorlagen sind allgemeine Richtwerte, keine Herstellerangaben. Die Werte für dein Modell stehen in deiner Bedienungsanleitung.</p>
+      <p><b>Einspielen und mehrere Fenster:</b> Spielst du eine Sicherung ein oder holst die Sicherheitskopie zurück, wartet Racebook, bis gerade laufende Speichervorgänge fertig sind; sie landen damit noch im bisherigen Stand und in der Sicherheitskopie. Danach werden offene Eingaben geschlossen, auch in anderen geöffneten Racebook-Fenstern, weil sie zum vorherigen Stand gehören. Was ein anderes Fenster noch für den alten Stand speichern wollte, wird abgewiesen und dort gemeldet.</p>
+      <p><b>Speicher und Sicherung:</b> Alles liegt nur in diesem Browser auf diesem Gerät. Erstelle unter „Daten &amp; Sicherung“ regelmäßig eine Sicherung und bewahre sie außerhalb des Handys auf.</p>
+    </div>
+  </section>
+
+  <section id="v-error" class="view" hidden aria-label="Fehler"><div id="errorBody"></div></section>
+</main>
+
+<nav class="tabs" id="tabs" aria-label="Bereiche des Motorrads" hidden><div class="tabs-in" id="tabsIn"></div></nav>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<dialog id="lightbox" class="lightbox" aria-label="Foto">
+  <img id="lbImg" alt="Foto in voller Größe">
+  <button class="btn" type="button" id="lbClose" autofocus>Schließen</button>
+</dialog>
+
+<dialog id="cropDlg" class="sheet" aria-labelledby="cropTitle">
+  <h2 id="cropTitle">Ausschnitt wählen</h2>
+  <canvas id="cropCanvas" class="crop" tabindex="0" role="img" aria-label="Vorschau des Ausschnitts. Mit Ziehen oder Pfeiltasten verschieben, mit Plus und Minus zoomen."></canvas>
+  <div class="f"><label for="cropZoom">Zoom</label><input type="range" id="cropZoom" min="1" max="4" step="0.01" value="1"></div>
+  <p class="hint">Zum Verschieben das Bild ziehen. Gespeichert wird genau dieser Ausschnitt, verkleinert und ohne Kameradaten.</p>
+  <div class="row"><button class="btn primary" type="button" id="cropOk">Übernehmen</button><button class="btn" type="button" id="cropReset">Zurücksetzen</button><button class="btn ghost" type="button" id="cropCancel">Abbrechen</button></div>
+</dialog>
+
+<dialog id="pickDlg" class="sheet" aria-labelledby="pickTitle">
+  <h2 id="pickTitle">Für welches Motorrad?</h2>
+  <div id="pickList" class="stack"></div>
+  <div class="row"><button class="btn ghost" type="button" id="pickCancel">Abbrechen</button></div>
+</dialog>
+
+<noscript><p class="noscript">Racebook braucht JavaScript.</p></noscript>
+</body>
+</html>
