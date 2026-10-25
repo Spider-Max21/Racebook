@@ -52,6 +52,8 @@ p{margin:0}
 .back{display:flex;align-items:center;justify-content:center;width:48px;height:48px;border:0;border-radius:50%;background:transparent;color:var(--bar-ink);cursor:pointer;flex:none;margin-left:-6px}
 .back .ic{width:26px;height:26px;stroke-width:2.2}
 .back:hover{background:#252A30}
+.back.labeled{width:auto;padding:0 14px 0 4px;border-radius:24px;gap:2px;font:600 16px/1 var(--f-body);white-space:nowrap}
+.appbar-in.fit-tight .back.labeled{font-size:14px;padding-right:8px}
 .bar-title{min-width:0;flex:1;display:flex;flex-direction:column;justify-content:center}
 .bt-main{font:700 21px/1.1 var(--f-cond);font-stretch:condensed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bt-sub{font-size:13px;color:var(--bar-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

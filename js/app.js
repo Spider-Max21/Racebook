@@ -34,6 +34,9 @@ function showPage(p){
    (nicht überall gibt es eine schmale Variante); was nicht passt, wird stufenweise kompakter, statt abgeschnitten
    zu werden oder seitlich überzustehen: Sicherungs-Knopf nur mit Symbol, Kurzform je Bereich, kleinere Schrift. */
 const over = el => el.scrollWidth > el.clientWidth + 0.5;
+/* Beschriftung abgeschnitten? Genau gemessen: scrollWidth rundet auf ganze Pixel und übersieht, dass ein Text
+   um Bruchteile eines Pixels zu breit ist (z. B. „Handbuch“ bei 412 px); der Browser zeigt dann trotzdem „…“. */
+const cut = el => { if (over(el)) return true; try { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.01; } catch (e) { return false; } };
 function fitBars(){
   const bar = $('.appbar-in'), chip = $('#backupChip');
   if (bar) {
@@ -47,9 +50,9 @@ function fitBars(){
   const tabs = $$('.tab', box);
   tabs.forEach(t => t.classList.remove('short'));
   const label = t => $$('span', t).find(s => s.offsetWidth > 0);
-  tabs.forEach(t => { const l = label(t); if (l && over(l) && t.querySelector('.l-short')) t.classList.add('short'); });
+  tabs.forEach(t => { const l = label(t); if (l && cut(l) && t.querySelector('.l-short')) t.classList.add('short'); });
   for (const k of ['fit-1', 'fit-2', 'fit-3']) {
-    if (!tabs.some(t => { const l = label(t); return l && over(l); })) break;
+    if (!tabs.some(t => { const l = label(t); return l && cut(l); })) break;
     box.classList.remove('fit-1', 'fit-2', 'fit-3'); box.classList.add(k);
   }
 }
@@ -62,6 +65,10 @@ function renderChrome(){
   const r = R.route, p = S.mode === 'error' ? 'error' : r.page;
   const b = curBike();
   $('#backBtn').hidden = p === 'home' || p === 'error';
+  /* Auf der Motorrad-Seite heißt der Knopf „Garage“ und führt zur Übersicht aller Motorräder */
+  const toG = p === 'bike', back = $('#backBtn');
+  back.classList.toggle('labeled', toG); $('.back-l', back).hidden = !toG;
+  back.setAttribute('aria-label', toG ? 'Garage: alle Motorräder' : 'Zurück');
   $('#homeLink').hidden = p !== 'home' && p !== 'error';
   const title = $('#barTitle');
   const t = p === 'bike' && b ? bike.titleOf(b) : p === 'data' ? 'Daten & Sicherung' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
@@ -200,6 +207,13 @@ function navigate(r, opts){
   if (opts.silent) { R.route = r; return; }
   applyRoute(r);
 }
+/* Zur Garage (Übersicht aller Motorräder). Sie liegt immer ganz unten im Verlauf (rb 0, siehe Start); dorthin
+   zurückspringen, damit die Zurück-Geste danach nicht wieder in ein Motorrad führt. */
+function toGarage(){
+  const depth = (history.state && history.state.rb) || 0;
+  if (depth > 0) { try { history.go(-depth); return; } catch (e) {} }
+  navigate({page: 'home'}, {replace: true});
+}
 function goBack(){
   if (history.state && history.state.rb > 0) history.back();
   else navigate({page: 'home'}, {replace: true});
@@ -257,7 +271,7 @@ document.addEventListener('click', async e => {
   if (t.matches('a[data-filehref]')) { if (t.getAttribute('aria-disabled') === 'true') e.preventDefault(); return; }
   if (t.dataset.nav) { e.preventDefault(); navigate({page: t.dataset.nav}); return; }
   if (t.disabled) return;
-  if (t.id === 'backBtn') { goBack(); return; }
+  if (t.id === 'backBtn') { if (R.route.page === 'bike') toGarage(); else goBack(); return; }
   if (t.id === 'backupChip') { navigate({page: 'data'}); return; }
   if (t.id === 'reloadBtn') { location.reload(); return; }
   if (t.id === 'replacedOk') { S.replaced = null; renderSys(); return; }

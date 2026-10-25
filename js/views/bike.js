@@ -3,7 +3,7 @@
    neu sind Motorradfoto, Spitzname, lokale Fotos und PDFs sowie atomare Mehrfachänderungen. */
 import {esc, str, fmt, eur, uid, v2, validId, safeUrl, turns, isISO, todayISO, fmtDate, canon, pad, subOf} from '../util.js';
 import {S, lsSet, lsJSON, bikeList, curBike, U, bikeName} from '../state.js';
-import {CHECK, GROUNDS, WEATHER, FLUIDS, MONTHS, LIM, MAX_COST, BRANDS, KW, INAMES, TEMPLATES, MODELS, MODEL_TPL, SF,
+import {CHECK, GROUNDS, WEATHER, FLUIDS, MONTHS, LIM, MAX_COST, BRANDS, BRAND_LIST, KW, INAMES, TEMPLATES, MODELS, MODEL_TPL, SF,
   brandOf, colorOf, plateOf, shortName, curOf, itemState, pillText, sortedItems, svcAtOf, valueAt, hasSetOn,
   serviceDoc, rideDoc, noteDoc, snapOf, sigOf, localParse, quickKindText, openDefects, DEFECT_PRIOS, canonDoc} from '../domain.js';
 import * as store from '../store.js';
@@ -266,20 +266,21 @@ export function modelOptions(brand){
   return ['mx4', 'en4', 't2', 'street'].filter(k => g[k]).reduce((a, k) => a.concat(g[k].split('|')), []).map(m => '<option value="' + esc(m) + '"></option>').join('');
 }
 function addBikeHTML(){
-  const opts = BRANDS.map(b => '<option value="' + esc(b.n) + '">' + esc(b.n) + '</option>').join('');
+  /* Marken alphabetisch, keine vorausgewählt */
+  const opts = '<option value="" selected disabled>Marke wählen</option>' + BRAND_LIST.map(b => '<option value="' + esc(b.n) + '">' + esc(b.n) + '</option>').join('');
   const tpl = Object.keys(TEMPLATES).map(k => '<option value="' + k + '">' + esc(TEMPLATES[k].label) + '</option>').join('');
   return '<div class="card"><div class="card-h"><h2>Motorrad hinzufügen</h2>' + (bikeList().length ? '<button class="link" type="button" id="addCancel">Abbrechen</button>' : '') + '</div>'
     + '<form id="addBikeForm" class="grid" novalidate>'
     + '<div class="f"><label for="abBrand">Marke</label><select id="abBrand">' + opts + '</select></div>'
-    + '<div class="f"><label for="abColor">Farbe</label><input type="color" id="abColor" value="' + BRANDS[0].c + '"></div>'
+    + '<div class="f"><label for="abColor">Farbe</label><input type="color" id="abColor" value="#4F6D7A"></div>'
     + '<div class="f full" id="abBrandOtherWrap" hidden><label for="abBrandOther">Markenname</label><input id="abBrandOther" autocomplete="off" placeholder="z. B. Rieju"></div>'
-    + '<div class="f"><label for="abModel">Modell</label><input id="abModel" list="abModels" autocomplete="off" placeholder="tippen oder wählen"><datalist id="abModels">' + modelOptions(BRANDS[0].n) + '</datalist></div>'
+    + '<div class="f"><label for="abModel">Modell</label><input id="abModel" list="abModels" autocomplete="off" placeholder="tippen oder wählen"><datalist id="abModels"></datalist></div>'
     + '<div class="f"><label for="abYear">Baujahr</label><input id="abYear" inputmode="numeric" autocomplete="off"></div>'
     + '<div class="f full"><label for="abNick">Spitzname (optional)</label><input id="abNick" maxlength="40" autocomplete="off" placeholder="z. B. Die Orange"></div>'
     + '<div class="f full"><label for="abTpl">Wartungspunkte vorbelegen</label><select id="abTpl">' + tpl + '</select></div>'
     + '<div class="f full"><label for="abUnit">Zählt nach</label><select id="abUnit"><option value="h">Betriebsstunden</option><option value="km">Kilometern</option></select></div>'
     + '<div class="f full"><span class="lbl" id="abPhotoLbl">Foto (optional)</span><div class="photo-pick" id="abPhotoBox">' + addPhotoInner() + '</div></div>'
-    + '<p class="hint full">Die Vorlagen sind Richtwerte, keine Herstellerangaben. Du kannst alles später unter Garage → Intervalle anpassen.</p>'
+    + '<p class="hint full">Die Vorlagen sind Richtwerte, keine Herstellerangaben. Du kannst alles später unter Technik → Intervalle anpassen.</p>'
     + '<div class="f full"><button class="btn primary" type="submit">Motorrad anlegen</button></div></form></div>';
 }
 function addPhotoInner(){
@@ -334,7 +335,7 @@ export function renderStatus(){
         + '<p class="hint" style="grid-column:1/-1">' + (past ? 'Weißt du den Stand von damals nicht, zählt für diesen Punkt nur die Frist in Monaten.' : 'Leer lassen, wenn du nicht abgelesen hast. Der Stand ergibt sich dann aus dem Verlauf.') + '</p>'
         + '<div class="row"><button class="btn primary" type="submit"' + (saving ? ' disabled' : '') + '>' + (saving ? 'Wird gespeichert …' : 'Eintragen') + '</button><button class="btn ghost" type="button" id="dfCancel"' + (saving ? ' disabled' : '') + '>Abbrechen</button></div></form>' : '')
       + '</div>';
-  }).join('') : '<p class="hint">Noch keine Wartungspunkte. Leg sie unter Garage → Intervalle an.</p>';
+  }).join('') : '<p class="hint">Noch keine Wartungspunkte. Leg sie unter Technik → Intervalle an.</p>';
 
   const defs = openDefects(b.id).slice().sort((x, y) => prioRank(x) - prioRank(y) || (y.date || '').localeCompare(x.date || ''));
   $('#statusDefects').innerHTML = defs.length
@@ -612,7 +613,7 @@ function openEdit(key){
   const u = U(b), cur = curOf(b);
   if (key === 'bike') {
     const known = !!brandOf(b);
-    const opts = BRANDS.map(x => '<option value="' + esc(x.n) + '"' + ((brandOf(b) === x || (!known && x.n === 'Andere')) ? ' selected' : '') + '>' + esc(x.n) + '</option>').join('');
+    const opts = BRAND_LIST.map(x => '<option value="' + esc(x.n) + '"' + ((brandOf(b) === x || (!known && x.n === 'Andere')) ? ' selected' : '') + '>' + esc(x.n) + '</option>').join('');
     $('#bikeBody').innerHTML = '<form id="bikeForm" class="grid" data-bike="' + esc(b.id) + '" novalidate>'
       + '<div class="f full"><label for="ebNick">Spitzname</label><input id="ebNick" maxlength="40" value="' + esc(b.nickname || '') + '" placeholder="optional"></div>'
       + '<div class="f"><label for="ebBrand">Marke</label><select id="ebBrand">' + opts + '</select></div>'
@@ -754,6 +755,7 @@ async function removeBike(b){
 }
 async function addBike(){
   const sel = $('#abBrand').value;
+  if (!sel) throw new VErr($('#abBrand'), 'Wähl eine Marke. Steht sie nicht in der Liste, nimm „Andere“.');
   const brand = (sel === 'Andere' ? (str($('#abBrandOther').value) || 'Andere') : sel).slice(0, 60);
   const year = fieldNum('abYear', 'Baujahr', {int: true, min: 1900, max: new Date().getFullYear() + 1});
   const tk = $('#abTpl').value, tpl = TEMPLATES[tk] || TEMPLATES.none;

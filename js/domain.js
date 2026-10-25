@@ -68,6 +68,9 @@ export const BRANDS = [
   {n:'Andere', c:'#4F6D7A'}
 ];
 
+/* Für Auswahllisten: alphabetisch (deutsch), „Andere“ am Ende */
+export const BRAND_LIST = BRANDS.filter(b => b.n !== 'Andere').sort((a, b) => a.n.localeCompare(b.n, 'de')).concat(BRANDS.filter(b => b.n === 'Andere'));
+
 /* Vorlagen für neue Motorräder (Richtwerte) */
 export const KW = {oil:['öl','oel','motoröl','ölwechsel','ölfilter'], air:['luftfilter','luffi'], chain:['kette'], plug:['zündkerze','kerze'], valves:['ventil'], fork:['gabel'], shock:['federbein','dämpfer','stoßdämpfer'], piston:['kolben'], coolant:['kühlflüssigkeit','kühlwasser','kühlmittel'], brake:['bremsflüssigkeit','entlüftet'], gear:['getriebeöl','getriebe'], reed:['membran'], silencer:['dämmwolle','dämmung','auspuff'], pads:['bremsbeläge','beläge']};
 export const INAMES = {oil:'Motoröl + Ölfilter', air:'Luftfilter reinigen', chain:'Kette prüfen & schmieren', plug:'Zündkerze', valves:'Ventilspiel prüfen', fork:'Gabelservice', shock:'Federbein-Service', piston:'Kolben + Ringe', coolant:'Kühlflüssigkeit', brake:'Bremsflüssigkeit', gear:'Getriebeöl', reed:'Membran prüfen', silencer:'Schalldämpfer-Dämmwolle', pads:'Bremsbeläge prüfen'};

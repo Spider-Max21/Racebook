@@ -65,7 +65,7 @@ Die Claude-App speichert in deinem Claude-Konto, die neue App auf dem Gerät. Ei
 1. Racebook in Claude öffnen → **Garage → Daten**.
 2. „Sicherung speichern (.json)“ antippen. Falls dort „Sicherung kopieren“ steht: antippen, der Text liegt dann in der Zwischenablage.
 3. Neue App öffnen → **Daten & Sicherung → Sicherung einspielen** → die `.json`-Datei wählen **oder** den kopierten Text in das Feld einfügen und „Eingefügten Text prüfen“ tippen.
-4. Die Vorschau zeigt Motorräder, Anzahl der Einträge und – einzeln benannt – **welche Anhänge nicht übernommen werden können**. Fotos und PDFs, die in der Claude-App hochgeladen wurden, liegen in Claudes Dateispeicher und stecken nicht in der JSON-Sicherung. Lade sie bei Bedarf neu hoch (Garage → Foto, Handbuch → PDF). Web-Links zu Anleitungen bleiben erhalten.
+4. Die Vorschau zeigt Motorräder, Anzahl der Einträge und – einzeln benannt – **welche Anhänge nicht übernommen werden können**. Fotos und PDFs, die in der Claude-App hochgeladen wurden, liegen in Claudes Dateispeicher und stecken nicht in der JSON-Sicherung. Lade sie bei Bedarf neu hoch (Technik → Foto, Handbuch → PDF). Web-Links zu Anleitungen bleiben erhalten.
 5. „Alle Daten ersetzen“ tippen. Die App schreibt alles in einem Schritt, liest es danach zurück und vergleicht es mit der Sicherung. Erst dann meldet sie den Erfolg.
 
 Die Daten in Claude bleiben dabei unverändert.
@@ -129,7 +129,13 @@ tests/                automatische Tests: nicht im App-ZIP, sondern im Test-ZIP 
 
 Keine externen Bibliotheken, keine Schriftarten aus dem Netz, keine Verbindung zu fremden Servern. Die Texterkennung im Schnell-Eintrag läuft auf dem Gerät; eine KI ist in dieser Fassung nicht eingebaut.
 
-## 8. Schnell-Eintrag
+## 8. Bedienung in Kürze
+
+- **Garage** ist die Übersicht aller Motorräder (Startseite). Auf der Seite eines Motorrads führt „‹ Garage“ oben links dorthin zurück.
+- Unten wählst du den Bereich des Motorrads: Status, Mängel, Logbuch, Fahrten, Setup, **Technik** (Motorrad, Reifen & Kette, Öle, Teilevorrat, Wartungsintervalle) und Handbuch. Passt ein Name nicht ganz, steht eine Kurzform da („Log“, „Handb.“).
+- Bei „Motorrad hinzufügen“ stehen die Marken alphabetisch, „Andere“ am Ende; vorausgewählt ist keine.
+
+## 9. Schnell-Eintrag
 
 Schreib oder diktier unter Status, was du gemacht hast. Vor dem Speichern zeigt eine Vorschau, was erkannt wurde; „Bearbeiten“ öffnet das passende Formular. Die Erkennung läuft auf dem Gerät, ohne Internet und ohne KI.
 
@@ -159,7 +165,7 @@ Im Zweifel wird also nichts als erledigt eingetragen. War es doch erledigt, übe
 
 **Teile:** „Gekauft“ und „Kaufen“ ändern einen vorhandenen Posten (gleicher Name, Groß-/Kleinschreibung egal), sonst entsteht ein neuer. „Bearbeiten“ öffnet dann das Teileformular für genau diesen Posten („Teil ändern“); die Anzahl dort ist der Bestand nach dem Speichern. Einkäufe und die Knöpfe + und − zählen um die Anzahl weiter, nicht auf eine feste Zahl: Kaufst du in zwei Fenstern gleichzeitig 2 und 3 Ölfilter dazu, stehen danach 5 mehr im Vorrat.
 
-## 9. Mehrere Fenster
+## 10. Mehrere Fenster
 
 Racebook darf in mehreren Tabs oder Fenstern desselben Browsers offen sein. Änderungen erscheinen in den anderen ohne Neuladen. Zwei Regeln schützen den Bestand, unabhängig davon, ob die Fenster voneinander erfahren:
 
@@ -169,6 +175,6 @@ Racebook darf in mehreren Tabs oder Fenstern desselben Browsers offen sein. Änd
 
 Racebook möglichst nur an einer Stelle offen halten (installierte App oder Browser). Hängt ein Speichervorgang länger als etwa 4 Sekunden, zeigt Racebook einen Hinweis, dass vermutlich ein anderes Fenster den Speicher blockiert.
 
-## 10. Grenzen dieser Fassung
+## 11. Grenzen dieser Fassung
 
 Siehe `Racebook-PWA-Ueberblick.md` (Änderungen, Grenzen, nächste Schritte) und den Testbericht im Test-ZIP (`tests/TESTBERICHT.md`).

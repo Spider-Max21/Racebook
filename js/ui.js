@@ -102,7 +102,7 @@ const P = {
   log: '<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11M9 8h6"/>',
   rides: '<path d="M5 21V4M5 4h12l-2 4 2 4H5"/>',
   setup: '<path d="M6 4v16M12 4v16M18 4v16"/><path d="M4 9h4M10 15h4M16 7h4"/>',
-  garage: '<path d="M3 10l9-6 9 6v10H3z"/><path d="M7 20v-6h10v6"/>',
+  garage: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="6.5"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
   manual: '<path d="M12 6c-2-1.5-5-2-8-1.5V19c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5V4.5C17 4 14 4.5 12 6z"/><path d="M12 6v14.5"/>',
   save: '<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
@@ -122,7 +122,7 @@ const P = {
 export const icon = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (P[n] || '') + '</svg>';
 
 /* ---------- Navigation ---------- */
-export const SECTIONS = [['status', 'Status'], ['defects', 'Mängel'], ['log', 'Logbuch', 'Logbuch', 'Log'], ['rides', 'Fahrten'], ['setup', 'Setup', 'Fahrwerk-Setups'], ['garage', 'Garage'], ['manual', 'Handbuch', 'Handbuch', 'Handb.']];
+export const SECTIONS = [['status', 'Status'], ['defects', 'Mängel'], ['log', 'Logbuch', 'Logbuch', 'Log'], ['rides', 'Fahrten'], ['setup', 'Setup', 'Fahrwerk-Setups'], ['garage', 'Technik'], ['manual', 'Handbuch', 'Handbuch', 'Handb.']];
 export function parseRoute(h){
   h = String(h == null ? location.hash : h).replace(/^#/, '');
   const p = h.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch (e) { return ''; } });

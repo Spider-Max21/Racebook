@@ -20,7 +20,7 @@
 <a class="skip" href="#main" data-skip="1">Zum Inhalt springen</a>
 <header class="appbar">
   <div class="appbar-in">
-    <button class="back" id="backBtn" type="button" aria-label="Zurück" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button class="back" id="backBtn" type="button" aria-label="Zurück" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span class="back-l" hidden>Garage</span></button>
     <a class="brandmark" id="homeLink" href="#/"><img src="icons/emblem.svg" alt="" width="34" height="34"><span>Racebook</span></a>
     <div class="bar-title" id="barTitle" hidden></div>
     <button class="bchip" id="backupChip" type="button" hidden></button>
@@ -31,8 +31,8 @@
   <div id="sysMsg" class="sysmsg" role="status" hidden></div>
 
   <!-- ÜBERSICHT -->
-  <section id="v-home" class="view" aria-label="Übersicht">
-    <h1 class="sr">Racebook, Übersicht</h1>
+  <section id="v-home" class="view" aria-label="Garage">
+    <h1 class="sr">Racebook, Garage: alle Motorräder</h1>
     <div id="homeBody" class="stack-l"><p class="hint thinking">Garage wird geladen …</p></div>
   </section>
 
@@ -217,8 +217,8 @@
 
     <!-- GARAGE -->
     <section id="v-garage" class="sub" hidden>
-      <h2 class="sr">Garage</h2>
-      <nav class="jump" aria-label="Abschnitte der Garage">
+      <h2 class="sr">Technik</h2>
+      <nav class="jump" aria-label="Abschnitte unter Technik">
         <button class="mini" type="button" data-jump="g-bike">Motorrad</button>
         <button class="mini" type="button" data-jump="g-tc">Reifen &amp; Kette</button>
         <button class="mini" type="button" data-jump="g-oil">Öle</button>
@@ -267,7 +267,7 @@
       </div>
       <div class="card">
         <div class="card-h"><h2>Herstellervorgaben</h2><button class="link" type="button" data-edit="oem">Bearbeiten</button></div>
-        <p class="hint" style="margin-bottom:10px">Nur zur schnellen Übersicht. Deine eigenen Intervalle unter Garage bleiben davon unberührt.</p>
+        <p class="hint" style="margin-bottom:10px">Nur zur schnellen Übersicht. Deine eigenen Intervalle unter Technik bleiben davon unberührt.</p>
         <div id="oemBody"></div>
       </div>
     </section>
