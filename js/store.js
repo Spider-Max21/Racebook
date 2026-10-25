@@ -23,6 +23,10 @@ const L = {}; COLLS.forEach(k => { L[k] = {}; });
 const pend = {};
 const subs = {};
 let inflightN = 0, epochCb = null, slowCb = null;
+/* Kennungen der im Speicher angewendeten Bestandsänderungen (Kopie von meta 'ops', siehe db.js) */
+let applied = new Set();
+const ledgerOf = meta => { const m = (meta || []).find(x => x && x.k === 'ops'); return new Set(m && m.ids && typeof m.ids === 'object' ? Object.keys(m.ids) : []); };
+export const isApplied = op => applied.has(op);
 /* Hängt ein Schreibvorgang länger als SLOW_MS, meist weil Racebook noch in einem anderen Tab offen ist und den
    Speicher blockiert: Hinweis anzeigen (slowCb(true)), nach dem Ende wieder entfernen (slowCb(false)) */
 const SLOW_MS = 4000;
@@ -60,6 +64,7 @@ export async function loadAll(){
   COLLS.forEach(c => { L[c] = {}; (r[c] || []).forEach(d => { if (d && validId(d.id)) L[c][d.id] = strip(d); }); });
   const old = S.epoch, ep = DB.epochOf(r.meta);
   S.epoch = ep;
+  applied = ledgerOf(r.meta);
   mirrorAll();
   return old != null && old !== ep;
 }
@@ -69,6 +74,7 @@ async function reload(colls){
   const r = await DB.readRecords(list.concat(['meta']));
   /* Bestand in einem anderen Fenster ersetzt: alles neu lesen und die Oberfläche zurücksetzen */
   if (DB.epochOf(r.meta) !== S.epoch) { await reloadAll(); return; }
+  ledgerOf(r.meta).forEach(op => applied.add(op));
   list.forEach(c => { L[c] = {}; (r[c] || []).forEach(d => { if (d && validId(d.id)) L[c][d.id] = strip(d); }); mirrorAll(); emit(c); });
 }
 /* Änderungen aus einem anderen Fenster derselben App übernehmen */
@@ -177,6 +183,49 @@ async function updateR(coll, id, patch, files, ep){
   }
   emit(coll);
   return 'ok';
+}
+
+/* Bestand eines Teils ändern: um spec.add (Einkauf, Plus/Minus), spec.low = als knapp markieren,
+   spec.set = weitere Felder. op ist die feste Vorgangskennung: Eine Wiederholung mit derselben Kennung wird
+   im Speicher genau einmal angewendet. Ist das Ergebnis offen, klärt die Liste der angewendeten Kennungen,
+   ob die Änderung angekommen ist. Testschnittstelle wie bei Änderungen: __T.fail 'update' auf parts/<id>. */
+export function sAdjustR(id, op, spec, opts){
+  const ep = epochArg(opts);
+  return counted(() => adjustR(id, op, spec || {}, ep));
+}
+async function adjustR(id, op, spec, ep){
+  if (!ready()) { S.lastErr = notReady(); return 'fail'; }
+  const coll = 'parts', path = coll + '/' + id, t = T();
+  if (t && t.latency) await wait(t.latency);
+  const check = async () => { const n = await askApplied(op, id); return n.state !== 'known' ? 'unclear' : n.applied ? 'ok' : 'fail'; };
+  const f = failOf('update', path);
+  if (f && !f.after) { S.lastErr = {code: 'unavailable'}; return check(); }
+  const ops = [{store: coll, type: 'adjust', id, op, add: Math.round(Number(spec.add) || 0), low: !!spec.low, set: spec.set && Object.keys(spec.set).length ? clone(spec.set) : null}];
+  const r = await run(ops, (late, res) => {
+    applied.add(op);
+    ((res && res.adjusted) || []).forEach(x => { if (x.doc) L[coll][x.id] = strip(x.doc); mirror(coll, x.id); });
+    if (late) emit(coll);
+  }, {epoch: ep});
+  if (r.err) { S.lastErr = r.err; return isFinal(r.err) ? 'fail' : check(); }
+  if (r.timeout) { S.lastErr = {code: 'timeout'}; return 'unclear'; }
+  if (t && t.writes) t.writes.push('adjust ' + path);
+  if (f && f.after) {
+    if (f.late) emit(coll, f.lateMs || 80); else { emit(coll); await wait(20); }
+    S.lastErr = {code: 'unavailable'};
+    return check();
+  }
+  emit(coll);
+  return 'ok';
+}
+/* Ist eine Bestandsänderung im Speicher angewendet? {state: 'known', applied} oder {state: 'unclear'} */
+export async function askApplied(op, id){
+  if (failOf('get', 'parts/' + id)) return {state: 'unclear'};
+  try {
+    const m = await DB.get('meta', 'ops', 8000);
+    const yes = !!(m && m.ids && m.ids[op]);
+    if (yes) applied.add(op);
+    return {state: 'known', applied: yes};
+  } catch (e) { return {state: 'unclear'}; }
 }
 
 export function sDelR(coll, id, opts){

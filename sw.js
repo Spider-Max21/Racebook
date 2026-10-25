@@ -1,7 +1,7 @@
 /* Racebook – Service Worker: hält die App für den Offline-Betrieb bereit.
    Die Daten liegen in IndexedDB und werden hier nie angefasst. Eine neue App-Version wird zuerst
    vollständig geladen und erst aktiv, wenn die Seite es anfordert („Jetzt aktualisieren“). */
-const VERSION = 'racebook-1.0.2';
+const VERSION = 'racebook-1.0.3';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/util.js', 'js/state.js', 'js/domain.js', 'js/db.js', 'js/store.js', 'js/ops.js', 'js/ui.js',

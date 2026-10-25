@@ -46,7 +46,7 @@ export async function waitIdle(ms){
 export function parkOp(k){
   const o = S.ops[k]; if (!o || o.saving) return;
   delete S.ops[k];
-  if (o.state === 'unclear' && o.payload && !o.noTrack) addUnres(o.coll, o.op, o.payload, o.label, o.patch, o.epoch);
+  if (o.state === 'unclear' && o.payload && !o.noTrack) addUnres(o.coll, o.op, o.payload, o.label, o.patch, o.epoch, o.adj);
 }
 /* Dateien eines Vorgangs, die nicht gespeichert wurden, freigeben (nur wenn ungenutzt) */
 export function releasePayload(p){ const ids = payloadFiles(p); if (ids.length) cleanupFiles(ids); }
@@ -59,7 +59,7 @@ export async function execOp(k, o, write){
   else if (r === 'fail') { if (S.ops[k] === o) delete S.ops[k]; releasePayload(o.payload); if (!o.quietFail) toast(errText(S.lastErr) + ' Es wurde nichts gespeichert.'); }
   else {
     o.state = 'unclear';
-    if (S.ops[k] !== o && !o.noTrack) addUnres(o.coll, o.op, o.payload, o.label, o.patch, o.epoch);
+    if (S.ops[k] !== o && !o.noTrack) addUnres(o.coll, o.op, o.payload, o.label, o.patch, o.epoch, o.adj);
     toast('Unklar, ob gespeichert wurde. ' + (S.lastErr && S.lastErr.code === 'timeout' ? 'Der Speicher hat nicht geantwortet; ist Racebook noch in einem anderen Tab offen? Schließ es dort. ' : '') + 'Tipp nochmal auf „Eintragen“, dabei entsteht kein doppelter Eintrag.');
     /* Eine bestätigte Meldung kann schon während des Speicherns angekommen sein: sofort abgleichen */
     reconcile();
@@ -69,6 +69,8 @@ export async function execOp(k, o, write){
 }
 /* Ein Vorgang, dessen Eintrag der Speicher bestätigt hat, gilt als erledigt */
 export function opDone(o){
+  /* Bestandsänderung (adj): erledigt, wenn der Speicher ihre Kennung als angewendet führt */
+  if (o.adj) return store.isApplied(o.op);
   if (!S.loaded[o.coll]) return false;
   if (o.coll === 'bikes') return !!(S.bikes[o.op] && !S.bikes[o.op]._pending && (!o.patch || subOf(o.payload, S.bikes[o.op])));
   /* Änderungs-Vorgang (patch): erledigt, wenn der Eintrag die geänderten Werte trägt */
@@ -82,17 +84,20 @@ export function reconcile(){
     if (o.gen === (S.gen[k] || 0)) hooks.closeDraft(k);
     toast('Der Eintrag ist gespeichert.');
   });
-  const found = S.unres.filter(u => opDone({coll: u.coll, op: u.id, patch: u.patch, payload: u.payload}));
-  if (found.length) { found.forEach(u => dropUnres(u.coll, u.id)); toast('Ein früherer, unklarer Speicherversuch ist doch angekommen: ' + found.map(u => u.label || 'Eintrag').join(', ') + '. Prüf bei Bedarf das Logbuch.'); }
+  const found = S.unres.filter(u => opDone({coll: u.coll, op: u.id, patch: u.patch, payload: u.payload, adj: u.adj}));
+  if (found.length) { found.forEach(u => dropUnres(u.coll, u.id)); toast('Ein früherer, unklarer Speicherversuch ist doch angekommen: ' + found.map(u => u.label || 'Eintrag').join(', ') + '. Prüf bei Bedarf ' + (found.every(u => u.coll === 'parts') ? 'den Teilevorrat.' : 'das Logbuch.')); }
   hooks.reconcilePending();
 }
 /* Ungeklärte frühere Speicherversuche */
 function saveUnres(){ lsSet('unresolved', JSON.stringify(S.unres)); }
-export function addUnres(coll, id, payload, label, patch, epoch){
+/* adj: Bestandsänderung eines Teils (id = Vorgangskennung, payload.id = Teil); abgeglichen über die Liste
+   der angewendeten Kennungen im Speicher */
+export function addUnres(coll, id, payload, label, patch, epoch, adj){
   if (!payload) return;
   /* Gehört der Versuch zu einem inzwischen ersetzten Bestand, gibt es nichts mehr abzugleichen */
   if (typeof epoch === 'string' && epoch !== (S.epoch || '')) return;
-  S.unres = S.unres.filter(u => !(u.coll === coll && u.id === id)); S.unres.push({coll, id, payload, label: label || 'Eintrag', patch: !!patch, epoch: S.epoch || ''}); saveUnres(); hooks.renderSys();
+  const u = {coll, id, payload, label: label || 'Eintrag', patch: !!patch, epoch: S.epoch || ''}; if (adj) u.adj = true;
+  S.unres = S.unres.filter(x => !(x.coll === coll && x.id === id)); S.unres.push(u); saveUnres(); hooks.renderSys();
 }
 /* Nach dem Ersetzen des Bestands: ungeklärte Versuche des alten Bestands verwerfen. Ergebnis: Anzahl */
 export function dropForeignUnres(){
@@ -105,6 +110,13 @@ export function dropUnres(coll, id){ const n = S.unres.length; S.unres = S.unres
 export async function checkUnres(){
   let arrived = 0, lost = 0;
   for (const u of S.unres.slice()) {
+    if (u.adj) {
+      const a = await store.askApplied(u.id, u.payload && u.payload.id);
+      if (a.state !== 'known') continue;
+      if (a.applied) arrived++; else lost++;
+      dropUnres(u.coll, u.id);
+      continue;
+    }
     const n = await store.askStore(u.coll, u.id);
     if (n.state !== 'known') continue;
     if (n.exists && (u.patch ? subOf(u.payload, n.data) : same(n.data, u.payload))) { arrived++; dropUnres(u.coll, u.id); }

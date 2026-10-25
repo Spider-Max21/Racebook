@@ -7,7 +7,7 @@ import {CHECK, GROUNDS, WEATHER, FLUIDS, MONTHS, LIM, MAX_COST, BRANDS, KW, INAM
   brandOf, colorOf, plateOf, shortName, curOf, itemState, pillText, sortedItems, svcAtOf, valueAt, hasSetOn,
   serviceDoc, rideDoc, noteDoc, snapOf, sigOf, localParse, quickKindText, openDefects, DEFECT_PRIOS, canonDoc} from '../domain.js';
 import * as store from '../store.js';
-import {opFor, parkOp, execOp, bumpGen, lowCheck, addUnres, BIKE_FORMS, cleanupFiles, payloadFiles, flow} from '../ops.js';
+import {opFor, parkOp, execOp, bumpGen, lowCheck, addUnres, BIKE_FORMS, cleanupFiles, payloadFiles, flow, reconcile} from '../ops.js';
 import {$, $$, toast, errText, arm, VErr, fieldNum, fieldDate, imgTag, hydrate, fileUrl, icon, fmtSize} from '../ui.js';
 import {makePhoto, makeBikePhoto, makePdf} from '../images.js';
 import {openCropper} from '../cropper.js';
@@ -39,9 +39,12 @@ export function onQuick(e){
 /* Bereich eines Schnell-Eintrags */
 const pendColl = x => x.coll || (x.kind === 'ride' ? 'rides' : x.kind === 'defect' ? 'defects' : x.kind === 'part' ? 'parts' : 'log');
 export function parkPendingEntries(list, epoch){
-  (list || []).forEach(x => { if (x.state === 'unclear' && x.payload) addUnres(pendColl(x), x.op, x.payload, quickKindText(x.kind === 'part' ? x.mode : x.kind), !!x.patch, epoch); });
+  (list || []).forEach(x => { if (x.state === 'unclear' && x.payload) addUnres(pendColl(x), x.op, x.payload, quickKindText(x.kind === 'part' ? x.mode : x.kind) + (x.kind === 'part' ? ' ' + x.name : ''), !!x.patch, epoch, !!x.adj); });
 }
-/* Was ein Schnell-Eintrag speichert. Einmal beim ersten Speichern festgelegt (eingefroren). */
+/* Was ein Schnell-Eintrag speichert. Einmal beim ersten Speichern festgelegt (eingefroren).
+   Vorhandenes Teil: Änderung um die gekaufte Anzahl (adj), keine feste Zielzahl. Der Speicher wendet sie auf den
+   dann gespeicherten Bestand an, genau einmal je Vorgangskennung (x.op): Wiederholen zählt nicht doppelt,
+   ein gleichzeitiger Einkauf in einem anderen Fenster geht nicht verloren. */
 function pendingWrite(b, x){
   if (x.kind === 'ride') return {coll: 'rides', data: rideDoc(b, x)};
   if (x.kind === 'service') return {coll: 'log', data: serviceDoc(b, x)};
@@ -53,13 +56,20 @@ function pendingWrite(b, x){
   }
   if (x.kind === 'defect') return {coll: 'defects', data: canonDoc('defects', {bike: b.id, title: x.title, description: x.description || '', date: x.date, priority: x.priority || 'mid', status: 'open', doneDate: null, repairs: 0, repairLogId: '', photos: [], created: x.created})};
   if (x.kind === 'part') {
-    const ex = x.partId ? S.parts.find(q => q.id === x.partId) : null;
-    if (ex) return {coll: 'parts', id: ex.id, patch: true, data: x.mode === 'bought' ? {qty: Math.min(99999, Math.round(ex.qty || 0) + x.count)} : {min: Math.max(ex.min || 0, Math.round(ex.qty || 0))}};
+    if (x.partId) return {coll: 'parts', adj: true, data: {id: x.partId, add: x.mode === 'bought' ? x.count : 0, low: x.mode !== 'bought'}};
     return {coll: 'parts', data: canonDoc('parts', {name: x.name, bike: b.id, qty: x.mode === 'bought' ? x.count : 0, min: 1, created: x.created})};
   }
   return null;
 }
+/* Vorschau mit dem aktuellen Bestand (er kann sich in einem anderen Fenster geändert haben) */
+function partLive(x){
+  const ex = x.partId ? S.parts.find(q => q.id === x.partId) : null;
+  if (!ex) return x;
+  const q = Math.round(ex.qty || 0);
+  return Object.assign({}, x, x.mode === 'bought' ? {before: q, after: Math.min(99999, q + x.count)} : {before: q, after: q, min: Math.max(Math.round(ex.min || 0), q)});
+}
 function partText(x){
+  x = partLive(x);
   if (x.mode === 'bought') return x.partId ? 'Vorrat ' + fmt(x.before, 0) + ' → ' + fmt(x.after, 0) : 'neu im Vorrat: ' + fmt(x.after, 0) + ' (nachkaufen ab 1)';
   return x.partId ? 'als knapp markieren (' + fmt(x.before, 0) + ' im Vorrat, nachkaufen ab jetzt ' + fmt(x.min, 0) + ')' : 'neu auf der Einkaufsliste (0 im Vorrat, gilt als knapp)';
 }
@@ -119,18 +129,25 @@ async function commitPending(){
   const base = Date.now();
   p.entries.forEach((x, i) => { if (!x.created) x.created = base + i; });
   p.saving = true; p.tried = true; renderQuick();
-  let ok = 0;
+  let ok = 0; const other = [];
+  /* Vorschauzahlen für die Meldung danach festhalten */
+  p.entries.forEach(x => { if (x.kind === 'part' && x.partId && !x.payload) { const l = partLive(x); x.before = l.before; x.after = l.after; } });
   try {
     /* Ein Ablauf für alle Einträge: das Einspielen einer Sicherung wartet, bis er fertig ist */
     await flow(async () => {
       for (const x of p.entries.slice()) {
         const b = S.bikes[x.bike]; if (!b) continue;
         /* Nutzdaten einmal einfrieren; eine Wiederholung sendet dieselben Daten unter derselben ID */
-        if (!x.payload) { const w = pendingWrite(b, x); x.coll = w.coll; x.payload = w.data; x.patch = !!w.patch; if (w.id) x.op = w.id; }
+        if (!x.payload) { const w = pendingWrite(b, x); x.coll = w.coll; x.payload = w.data; x.patch = !!w.patch; x.adj = !!w.adj; if (w.id) x.op = w.id; }
         /* Gehört zum Bestand der Vorschau; wurde er inzwischen ersetzt, weist der Speicher den Eintrag ab */
-        const r = x.patch ? await store.sUpdateR(x.coll, x.op, x.payload, null, {epoch: p.epoch}) : await store.sSetR(x.coll, x.op, x.payload, null, {epoch: p.epoch});
+        const r = x.adj ? await store.sAdjustR(x.payload.id, x.op, x.payload, {epoch: p.epoch})
+          : x.patch ? await store.sUpdateR(x.coll, x.op, x.payload, null, {epoch: p.epoch}) : await store.sSetR(x.coll, x.op, x.payload, null, {epoch: p.epoch});
         x.state = r;
-        if (r === 'ok') { ok++; p.entries = p.entries.filter(e => e !== x); } else break;
+        if (r === 'ok') {
+          ok++; p.entries = p.entries.filter(e => e !== x);
+          /* Anderer Bestand als in der Vorschau: inzwischen auch anderswo geändert. Das Ergebnis nennen. */
+          if (x.adj) { const now = store.peek('parts', x.payload.id); if (now && x.mode === 'bought' && now.qty !== x.after) other.push('„' + x.name + '“: jetzt ' + fmt(now.qty, 0) + ' im Vorrat'); }
+        } else break;
       }
     });
   } finally { p.saving = false; }
@@ -139,7 +156,7 @@ async function commitPending(){
     if (p.entries.length) toast(errText(S.lastErr) + ' ' + (ok ? ok + ' Eintrag gespeichert, der Rest nicht.' : 'Der Schnell-Eintrag wurde nicht gespeichert.'));
     return;
   }
-  if (!p.entries.length) { S.pending = null; $('#quickText').value = ''; toast(ok > 1 ? ok + ' Einträge gespeichert.' : 'Eingetragen.'); }
+  if (!p.entries.length) { S.pending = null; $('#quickText').value = ''; toast((ok > 1 ? ok + ' Einträge gespeichert.' : 'Eingetragen.') + (other.length ? ' ' + other.join(', ') + ', weil der Bestand inzwischen auch in einem anderen Fenster geändert wurde.' : '')); }
   else {
     const unclear = p.entries.some(e => e.state === 'unclear');
     p.warn = (ok ? ok + ' gespeichert. ' : '') + (unclear ? 'Bei einem Eintrag ist unklar, ob er gespeichert wurde. ' + (S.lastErr && S.lastErr.code === 'timeout' ? 'Der Speicher hat nicht geantwortet. Ist Racebook noch in einem anderen Tab oder Fenster offen, zum Beispiel in Chrome? Schließ es dort. ' : '') : 'Der Rest wurde nicht gespeichert. ') + 'Tipp nochmal auf „Eintragen“, es entsteht dabei kein doppelter Eintrag.';
@@ -163,8 +180,19 @@ function editPending(i){
     $('#hoursInput').value = x.at != null ? v2(x.at) : '';
     setSection('status'); $('#hoursInput').focus();
   } else if (x.kind === 'part') {
-    $('#pName').value = x.name || ''; $('#pQty').value = String(x.mode === 'bought' ? (x.partId ? x.after : x.count) : 0); $('#pMin').value = '1';
-    const pb = $('#pBike'); if (pb && Array.from(pb.options).some(o => o.value === x.bike)) pb.value = x.bike;
+    /* Vorhandenes Teil: das Formular ändert genau diesen Posten (keinen neuen anlegen). Die Anzahl zeigt den
+       Bestand nach dem Einkauf; gespeichert wird die Änderung gegenüber dem Bestand beim Öffnen. */
+    const ex = x.partId ? S.parts.find(q => q.id === x.partId) : null;
+    closeDraft('partForm');
+    if (ex) {
+      const l = partLive(x), q = Math.round(ex.qty || 0);
+      partEditMode(ex, q);
+      $('#pName').value = ex.name; $('#pQty').value = String(x.mode === 'bought' ? l.after : q); $('#pMin').value = String(x.mode === 'bought' ? Math.round(ex.min || 0) : l.min);
+      const pb = $('#pBike'); if (pb && Array.from(pb.options).some(o => o.value === ex.bike)) pb.value = ex.bike;
+    } else {
+      $('#pName').value = x.name || ''; $('#pQty').value = String(x.mode === 'bought' ? x.count : 0); $('#pMin').value = '1';
+      const pb = $('#pBike'); if (pb && Array.from(pb.options).some(o => o.value === x.bike)) pb.value = x.bike;
+    }
     const det = $('#partForm').closest('details'); if (det) det.open = true; setSection('garage', 'g-parts');
   } else if (x.kind === 'ride') {
     $('#rDate').value = x.date; $('#rAmount').value = v2(x.amount);
@@ -188,7 +216,7 @@ export function reconcilePending(){
   const p = S.pending;
   if (p && !p.saving) {
     const before = p.entries.length;
-    p.entries = p.entries.filter(x => { const c = pendColl(x); return !(x.payload && S.loaded[c] && S[c].some(d => d.id === x.op && !d._pending && (!x.patch || subOf(x.payload, d)))); });
+    p.entries = p.entries.filter(x => { if (x.adj) return !(x.payload && store.isApplied(x.op)); const c = pendColl(x); return !(x.payload && S.loaded[c] && S[c].some(d => d.id === x.op && !d._pending && (!x.patch || subOf(x.payload, d)))); });
     if (p.entries.length !== before) { if (!p.entries.length) { S.pending = null; const q = $('#quickText'); if (q) q.value = ''; } toast('Der Eintrag ist gespeichert.'); }
   }
 }
@@ -200,10 +228,21 @@ export function closeDraft(k){
   else if (k === 'rideForm') { $('#rideForm').reset(); $('#rDate').value = todayISO(); $('#rideDetails').open = false; }
   else if (k === 'hoursForm') { const hf = $('#hoursForm'); hf.hidden = true; delete hf.dataset.confirm; $('#hoursHint').hidden = true; $('#hoursSave').textContent = 'Speichern'; }
   else if (k === 'setupForm') { resetSetupForm(); $('#setupDetails').open = false; }
-  else if (k === 'partForm') { $('#pName').value = ''; $('#pQty').value = '1'; $('#pMin').value = '1'; }
+  else if (k === 'partForm') { $('#pName').value = ''; $('#pQty').value = '1'; $('#pMin').value = '1'; partEditMode(null); }
   else if (k === 'addBikeForm') { S.adding = false; dropAddPhoto(); const el = $('#addBike'); if (el) el.innerHTML = ''; }
   else if (k === 'defectForm' || k === 'defDoneForm') { R.closeDefectDraft(k); }
   bumpGen(k);
+}
+
+/* Teileformular: neues Teil anlegen (Standard) oder einen vorhandenen Posten ändern (aus „Bearbeiten“ im Schnell-Eintrag) */
+function partEditMode(ex, base){
+  const f = $('#partForm'); if (!f) return;
+  if (ex) { f.dataset.part = ex.id; f.dataset.base = String(base); } else { delete f.dataset.part; delete f.dataset.base; }
+  $('#partFormTitle').textContent = ex ? 'Teil ändern' : 'Teil hinzufügen';
+  $('#pSave').textContent = ex ? 'Speichern' : 'Hinzufügen';
+  $('#pCancel').hidden = !ex;
+  const h = $('#partEditHint'); h.hidden = !ex;
+  h.textContent = ex ? 'Du änderst den vorhandenen Posten „' + ex.name + '“ (beim Öffnen ' + fmt(base, 0) + ' im Vorrat). Anzahl = Bestand nach dem Speichern. Kauft jemand in einem anderen Fenster gleichzeitig dazu, wird beides gezählt.' : '';
 }
 
 /* ---------- Anzeige ---------- */
@@ -854,6 +893,7 @@ async function storeBikePhoto(file, forAdd, bid, epoch, res){
 export async function onClick(t){
   if (t.id === 'addCancel') { closeDraft('addBikeForm'); R.navigate({page: 'home'}, {replace: true}); return true; }
   if (t.id === 'abPhotoDrop') { dropAddPhoto(); $('#abPhotoBox').innerHTML = addPhotoInner(); return true; }
+  if (t.id === 'pCancel') { if (!(S.ops.partForm && S.ops.partForm.saving)) { parkOp('partForm'); closeDraft('partForm'); } return true; }
   if (t.dataset.v) { setSection(t.dataset.v); return true; }
   if (t.dataset.goto) { if (t.dataset.goto === 'defects' && t.dataset.open) R.openDefectForm(); setSection(t.dataset.goto, t.dataset.anchor); return true; }
   if (t.dataset.jump) { const el = document.getElementById(t.dataset.jump); if (el) el.scrollIntoView({block: 'start', behavior: 'smooth'}); return true; }
@@ -918,16 +958,25 @@ export async function onClick(t){
     return true;
   }
   if (t.dataset.qty) {
-    /* Eine Änderung pro Teil zur Zeit; schlägt sie fehl, wird genau diese Änderung zurückgenommen */
+    /* Eine Änderung pro Teil zur Zeit. Gespeichert wird „eins mehr/weniger“ mit fester Vorgangskennung, auf den
+       dann gespeicherten Bestand angewendet: Zwei Fenster gleichzeitig zählen beide. Schlägt sie sicher fehl,
+       wird genau diese Änderung zurückgenommen; ist das Ergebnis offen, wird sie getrennt weiter abgeglichen. */
     const pid = t.dataset.qty;
     if (S.qtyBusy.has(pid)) return true;
     const p = S.parts.find(x => x.id === pid); if (!p) return true;
-    const prev = Math.round(p.qty || 0), q = Math.max(0, Math.min(99999, prev + Number(t.dataset.d)));
+    const d = Number(t.dataset.d), prev = Math.round(p.qty || 0), q = Math.max(0, Math.min(99999, prev + d));
     if (q === prev) return true;
+    const op = uid(), spec = {id: pid, add: d}, label = 'Teil ' + p.name + ' ' + (d > 0 ? '+' : '−') + Math.abs(d), ep = S.epoch || '';
     S.qtyBusy.add(pid); p.qty = q; renderGarage(); renderBanner();
-    let ok = false;
-    try { ok = await sUpdate('parts', pid, {qty: q}); } finally { S.qtyBusy.delete(pid); }
-    if (!ok) { const now = S.parts.find(x => x.id === pid); if (now && now.qty === q) now.qty = prev; }
+    let r = 'fail';
+    try { r = await flow(() => store.sAdjustR(pid, op, spec, {epoch: ep})); } finally { S.qtyBusy.delete(pid); }
+    if (r === 'fail') { const now = S.parts.find(x => x.id === pid); if (now && now.qty === q) now.qty = prev; toast(errText(S.lastErr) + ' Es wurde nichts gespeichert.'); }
+    else if (r === 'unclear') {
+      addUnres('parts', op, spec, label, false, ep, true);
+      toast('Unklar, ob die Änderung gespeichert wurde. Racebook gleicht das selbst ab. Tipp erst wieder, wenn der Hinweis oben verschwunden ist, sonst zählt es doppelt.');
+      /* Anzeige wieder auf den bekannten gespeicherten Stand; eine späte Bestätigung wird übernommen */
+      store.emit('parts'); reconcile();
+    }
     renderGarage(); renderBanner();
     return true;
   }
@@ -1002,6 +1051,26 @@ export async function onSubmit(f, busy){
     const qty = fieldNum('pQty', 'Anzahl', {int: true, min: 0, max: 99999}) || 0;
     const min = fieldNum('pMin', 'Nachkaufen ab', {int: true, min: 0, max: 99999}) || 0;
     const pb = $('#pBike').value, forBike = pb === 'both' || S.bikes[pb] ? pb : 'both';
+    if (f.dataset.part) {
+      /* Vorhandenen Posten ändern: dieselbe ID, Anzahl als Änderung gegenüber dem Bestand beim Öffnen */
+      const pid = f.dataset.part, base = Number(f.dataset.base) || 0;
+      const ex = S.parts.find(x => x.id === pid);
+      if (!ex) { closeDraft('partForm'); toast('Dieses Teil gibt es inzwischen nicht mehr. Leg es bei Bedarf neu an.'); return true; }
+      const o = opFor('partForm', '', 'parts', pid, [pid, base, name, forBike, qty, min].join('|')); if (o.saving) return true;
+      const g = S.gen.partForm || 0;
+      if (!o.payload) {
+        const set = {min}; if (name !== ex.name) set.name = name; if (forBike !== ex.bike) set.bike = forBike;
+        o.payload = {id: pid, add: qty - base, set}; o.adj = true; o.label = 'Teil ' + name;
+      }
+      busy(true);
+      const r = await execOp('partForm', o, () => store.sAdjustR(pid, o.op, o.payload, {epoch: o.epoch}));
+      if (r === 'ok') {
+        const now = store.peek('parts', pid);
+        if ((S.gen.partForm || 0) === g) closeDraft('partForm');
+        toast(now && now.qty !== qty ? 'Gespeichert. „' + name + '“: jetzt ' + fmt(now.qty, 0) + ' im Vorrat, weil der Bestand inzwischen auch in einem anderen Fenster geändert wurde.' : 'Teil gespeichert.');
+      }
+      return true;
+    }
     const o = opFor('partForm', '', 'parts', null, [name, forBike, qty, min].join('|')); if (o.saving) return true;
     const g = S.gen.partForm || 0;
     if (!o.payload) { o.payload = canonDoc('parts', {name, bike: forBike, qty, min, created: o.created}); o.label = 'Teil ' + name; }

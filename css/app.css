@@ -372,7 +372,7 @@ dialog::backdrop{background:rgba(6,8,10,.72)}
   .sum b{font-size:32px}
 }
 .tab .l-short{display:none}
-@media (max-width:399px){ .tab{font-size:10.5px} .tab .ic{width:22px;height:22px} .tab .l-long{display:none} .tab .l-short{display:block} }
+@media (max-width:399px){ .tab{font-size:10.5px} .tab .ic{width:22px;height:22px} }
 @media (max-width:359px){
   .tab{font-size:10px;letter-spacing:-.02em}
   .grid{grid-template-columns:1fr}
@@ -382,6 +382,16 @@ dialog::backdrop{background:rgba(6,8,10,.72)}
   .brandmark{font-size:21px}
   .bchip{padding:6px 9px}
 }
+/* Schriftunabhängig: Passt etwas mit der Schrift des Geräts nicht, macht fitBars() (app.js) die Leisten stufenweise
+   kompakter, statt Beschriftungen abzuschneiden oder die Seite seitlich zu verschieben */
+.tab.short .l-long{display:none}
+.tab.short .l-short{display:block}
+.tabs-in.fit-1 .tab{font-size:10px;letter-spacing:-.02em}
+.tabs-in.fit-2 .tab{font-size:9.5px;letter-spacing:-.03em}
+.tabs-in.fit-3 .tab{font-size:9px;letter-spacing:-.04em}
+.appbar-in.fit-tight .brandmark{font-size:19px;gap:6px;padding-right:2px}
+.appbar-in.fit-tight .brandmark img{width:28px;height:28px}
+.appbar-in.fit-tight .bt-main{font-size:18px}
 @media (prefers-reduced-motion: reduce){ .thinking{animation:none} *{scroll-behavior:auto!important} }
 
 /* Einträge ohne Motorrad (Daten & Sicherung) */

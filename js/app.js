@@ -30,6 +30,34 @@ function showPage(p){
   $('#tabs').hidden = p !== 'bike';
   document.body.dataset.page = p;
 }
+/* Kopfleiste und Bereichsleiste an die tatsächliche Schrift anpassen. Geräte haben unterschiedliche Schriften
+   (nicht überall gibt es eine schmale Variante); was nicht passt, wird stufenweise kompakter, statt abgeschnitten
+   zu werden oder seitlich überzustehen: Sicherungs-Knopf nur mit Symbol, Kurzform je Bereich, kleinere Schrift. */
+const over = el => el.scrollWidth > el.clientWidth + 0.5;
+function fitBars(){
+  const bar = $('.appbar-in'), chip = $('#backupChip');
+  if (bar) {
+    bar.classList.remove('fit-tight');
+    if (over(bar) && chip && !chip.hidden && !chip.classList.contains('compact')) chip.classList.add('compact');
+    if (over(bar)) bar.classList.add('fit-tight');
+  }
+  const box = $('#tabsIn');
+  if (!box || $('#tabs').hidden) return;
+  box.classList.remove('fit-1', 'fit-2', 'fit-3');
+  const tabs = $$('.tab', box);
+  tabs.forEach(t => t.classList.remove('short'));
+  const label = t => $$('span', t).find(s => s.offsetWidth > 0);
+  tabs.forEach(t => { const l = label(t); if (l && over(l) && t.querySelector('.l-short')) t.classList.add('short'); });
+  for (const k of ['fit-1', 'fit-2', 'fit-3']) {
+    if (!tabs.some(t => { const l = label(t); return l && over(l); })) break;
+    box.classList.remove('fit-1', 'fit-2', 'fit-3'); box.classList.add(k);
+  }
+}
+let fitQ = 0;
+const fitSoon = () => { cancelAnimationFrame(fitQ); fitQ = requestAnimationFrame(fitBars); };
+window.addEventListener('resize', fitSoon);
+try { if (document.fonts) { document.fonts.ready.then(fitSoon); document.fonts.addEventListener('loadingdone', fitSoon); } } catch (e) {}
+
 function renderChrome(){
   const r = R.route, p = S.mode === 'error' ? 'error' : r.page;
   const b = curBike();
@@ -51,6 +79,7 @@ function renderChrome(){
   }
   if (p === 'bike') $$('.tab').forEach(x => x.setAttribute('aria-current', x.dataset.v === S.section ? 'page' : 'false'));
   document.title = t ? t + ' – Racebook' : 'Racebook';
+  fitBars();
 }
 const escHTML = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 

@@ -453,6 +453,15 @@ const PRIO_LOW_RE = new RegExp(B + '(irgendwann|später|spaeter|kein stress|nich
 const KIND_TEXT = {defect: 'Mangel', reading: 'Stand', bought: 'Teilevorrat', buy: 'Einkaufsliste', note: 'Notiz', ride: 'Fahrt', service: 'Wartung'};
 const lc = s => ' ' + String(s).toLowerCase() + ' ';
 const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+/* Satzteile trennen, ohne Zahlen zu zerlegen: Komma oder Punkt zwischen zwei Ziffern gehört zur Zahl
+   („1,5“, „1.5“, „12.400“, „24.10.“). Getrennt wird an ; ! ? Zeilenumbruch, an , und . außerhalb von Zahlen
+   sowie an „und“, „aber“, „sowie“. */
+const CLAUSE_RE = /\s*(?:[;!?\n]|(?<!\d)[,.]|[,.](?!\d))+\s*|\s+(?:und|aber|sowie)\s+/i;
+export const splitClauses = s => String(s).split(CLAUSE_RE).map(c => c.trim()).filter(Boolean);
+/* Satzteil mit Schadenswort und ohne Erledigt-Wort (dann ist „funktioniert nicht“ ein Schaden, keine Verneinung) */
+const isDefectClause = c => DEFECT_RE.test(lc(c)) && !DONE_RE.test(lc(c));
+/* Verneint oder geplant („nicht“, „noch nicht“, „kein“, „morgen“, „sollte“, „nächste Woche“ …), außerhalb von Schadens-Satzteilen */
+const openClause = s => splitClauses(s).some(c => !isDefectClause(c) && (NEG_RE.test(lc(c)) || PLAN_RE.test(lc(c))));
 
 function bikeWords(x){
   const w = [x.brand, x.short, shortName(x), x.model].filter(Boolean).map(v => String(v).toLowerCase());
@@ -492,7 +501,7 @@ function quickCommand(text, ctx){
     for (const w of ws) {
       if (low.startsWith(w) && !/[\wäöüß]/.test(low.charAt(w.length) || ' ')) {
         let rest = x.slice(w.length).replace(/^\s*[:\-–—]?\s*/, '');
-        return {kind, rest: stripLead(rest, ctx)};
+        return {kind, rest: stripLead(rest, ctx), word: cap(x.slice(0, w.length))};
       }
     }
   }
@@ -508,7 +517,8 @@ function defectEntry(clause, ctx, full, extraDesc){
 }
 /* Teile aus „2 Ölfilter, 1 Zündkerze“ */
 function partItems(rest){
-  return rest.split(/\s*(?:[,;]|\s(?:und|sowie)\s)\s*/i).map(s => s.trim()).filter(Boolean).map(s => {
+  /* Komma zwischen zwei Ziffern gehört zur Zahl („1,5“), sonst trennt es zwei Teile */
+  return rest.split(/\s*(?:;|(?<!\d),|,(?!\d)|\s(?:und|sowie)\s)\s*/i).map(s => s.trim()).filter(Boolean).map(s => {
     let qty = null, name = s;
     const m = s.match(new RegExp('^' + NUM_TOK + '\\s*(?:x|×|stück|stueck|stk\\.?|mal)?\\s+(.+)$', 'i')) || null;
     const m2 = !m && s.match(new RegExp('^(.+?)\\s+' + NUM_TOK + '\\s*(?:x|×|stück|stueck|stk\\.?)?$', 'i'));
@@ -568,7 +578,19 @@ export function localParse(text){
       return {entries: r.out, warn: warn.join(' '), cmd: k};
     }
     if (k === 'note') return {entries: [Object.assign(withBase(ctx, text), {kind: 'note', note: rest || text.trim()})], warn: '', cmd: k};
-    /* Fahrt oder Wartung ausdrücklich: übliche Erkennung, aber nur Einträge dieser Art */
+    /* Fahrt oder Wartung ausdrücklich. Das Stichwort bestimmt nur die Art. Ist etwas verneint oder geplant
+       („Wartung: Öl noch nicht gewechselt“, „Wartung: morgen Öl wechseln“), entsteht daraus nie eine erledigte
+       Wartung oder Fahrt: Es gilt dieselbe Auswertung wie ohne Stichwort (verneint → Notiz, geplante Tätigkeit
+       → offener Mangel), mit Hinweis. Schadenswörter wie „funktioniert nicht“ zählen nicht als Verneinung. */
+    if (openClause(rest || text)) {
+      const r = naturalParse(rest || text, ctx, text);
+      const es = r.entries.filter(x => x.kind !== 'ride' && x.kind !== 'service');
+      if (!es.length) es.push(Object.assign(withBase(ctx, text), {kind: 'note'}));
+      es.forEach(x => { if (x.kind === 'note') x.note = text.trim(); });
+      const asDefect = es.every(x => x.kind === 'defect');
+      return {entries: es, warn: 'Trotz „' + cmd.word + '“ keine erledigte ' + (k === 'ride' ? 'Fahrt' : 'Wartung') + ': Der Text klingt verneint oder geplant („nicht“, „morgen“ …). '
+        + (asDefect ? (es.length > 1 ? 'Ich lege offene Mängel an.' : 'Ich lege es als offenen Mangel an.') : 'Ich schlage es als Notiz vor.') + ' Ist es doch erledigt, tipp auf „Bearbeiten“.', cmd: k};
+    }
     const r = coreParse(rest || text, ctx, {keepNeg: true});
     let es = r.entries.filter(x => x.kind === k);
     if (!es.length) es = [Object.assign(withBase(ctx, text), k === 'ride' ? {kind: 'ride'} : {kind: 'service', extra: rest || text.trim()})];
@@ -577,32 +599,38 @@ export function localParse(text){
     if (k === 'ride' && es.some(x => x.amount == null) && !/fehlt eine gültige Fahrzeit/.test(w)) w = (w ? w + ' ' : '') + 'Bei der Fahrt fehlt eine gültige Fahrzeit.';
     return {entries: es, warn: w, cmd: k};
   }
+  return naturalParse(text, ctx, text);
+}
+/* Auswertung ohne Stichwort. text: der auszuwertende Text, full: der ganze eingetippte Text (für die Notiz) */
+function naturalParse(text, ctx, full){
   const t = lc(text);
-  /* Schadenswörter ohne Erledigt-Wort: Mangel. Ein kurzer Nachsatz wie „gespannt“ gehört zum Satz davor. */
-  const raw = text.split(/\s*[,;.!?\n]+\s*|\s+(?:und|aber|sowie)\s+/i).map(c => c.trim()).filter(Boolean);
+  /* Schadenswörter ohne Erledigt-Wort: Mangel. Ein kurzer Nachsatz wie „gespannt“ gehört zum Satz davor.
+     Zahlen bleiben beim Aufteilen ganz („1,5 Stunden gefahren, Gabel schwitzt“ → 1,5 Stunden). */
+  const raw = splitClauses(text);
   const clauses = [];
   raw.forEach(c => { const words = c.split(/\s+/).length; if (clauses.length && words <= 2 && DONE_RE.test(lc(c))) clauses[clauses.length - 1] += ', ' + c; else clauses.push(c); });
-  const defects = clauses.filter(c => DEFECT_RE.test(lc(c)) && !DONE_RE.test(lc(c)));
+  const defects = clauses.filter(isDefectClause);
   if (defects.length) {
     const others = clauses.filter(c => !defects.includes(c));
     const entries = [], left = [], warn = [];
     if (others.length) {
       const r = coreParse(others.join(', '), ctx, {});
       r.entries.forEach(x => {
+        x.note = full.trim();
         if (x.kind === 'ride' && x.amount != null) entries.push(x);
         else if (x.kind === 'service' && (x.tasks.length || DONE_RE.test(lc(others.join(' '))))) entries.push(x);
       });
       if (!entries.length) left.push(...others.map(c => stripLead(c, ctx)).filter(Boolean));
       else if (r.warn) warn.push(r.warn);
     }
-    defects.forEach((c, i) => entries.push(defectEntry(c, ctx, text, i === 0 && left.length ? left.join(', ') : '')));
+    defects.forEach((c, i) => entries.push(defectEntry(c, ctx, full, i === 0 && left.length ? left.join(', ') : '')));
     warn.push(defects.length > 1 ? 'Ich habe ' + defects.length + ' Mängel erkannt.' : 'Als Mangel erkannt.');
     if (entries.length > 1) warn.push('Prüf die Einträge; einzelne kannst du entfernen.');
     return {entries, warn: warn.join(' ')};
   }
   /* Wartungspunkt mit Verb in der Grundform, ohne Erledigt-Wort: offener Punkt, nicht erledigt */
   if (!DONE_RE.test(t) && !RIDE_RE.test(t) && !NEG_RE.test(t) && TODO_RE.test(t)) {
-    return {entries: [defectEntry(text, ctx, text)], warn: 'Das klingt nach etwas, das noch zu tun ist. Ich lege es als offenen Mangel an. Ist es schon erledigt, schreib z. B. „gespannt“ oder „gewechselt“ dazu.'};
+    return {entries: [defectEntry(text, ctx, full)], warn: 'Das klingt nach etwas, das noch zu tun ist. Ich lege es als offenen Mangel an. Ist es schon erledigt, schreib z. B. „gespannt“ oder „gewechselt“ dazu.'};
   }
   return coreParse(text, ctx, {});
 }

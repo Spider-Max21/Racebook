@@ -9,6 +9,12 @@
    - Beziehungen werden in der Transaktion geprüft: Ein Eintrag, der zu einem Motorrad gehört, wird nur
      gespeichert, wenn es das Motorrad im Speicher gibt (Fehler 'orphan'). Ein Motorrad wird mit allen
      tatsächlich gespeicherten Einträgen entfernt, nicht nur mit denen, die ein Fenster kennt.
+   - Bestandsänderungen bei Teilen (Einkauf, Plus/Minus) sind Änderungen um eine Anzahl, keine festen
+     Zielwerte: Sie werden in der Transaktion auf den dann gespeicherten Bestand angewendet, jeweils genau
+     einmal. Dafür hat jede Änderung eine feste Vorgangskennung; angewendete Kennungen stehen im
+     Verwaltungsspeicher (meta, Eintrag 'ops'). Eine Wiederholung derselben Kennung ändert nichts; zwei
+     verschiedene Einkäufe in zwei Fenstern zählen beide. Der Eintrag 'ops' gehört zu diesem Gerät und ist
+     nicht Teil der Sicherung.
    - Keine Oberfläche, keine Fachlogik. */
 
 export const DB_NAME = 'racebook';
@@ -115,6 +121,7 @@ export function deleteDB(dbname){
 }
 
 const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(mapErr(r.error)); });
+const validOp = s => typeof s === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(s);
 function txOf(stores, mode){
   if (!db) throw {code: 'closed'};
   try { return db.transaction(stores, mode || 'readonly'); } catch (e) { throw mapErr(e); }
@@ -138,28 +145,43 @@ export async function setMeta(rec, epoch){ return commit([{store: 'meta', type: 
 export const epochOf = meta => { const i = (meta || []).find(m => m && m.k === 'info'); return (i && typeof i.epoch === 'string') ? i.epoch : ''; };
 
 /* Atomarer Schreibvorgang.
-   ops: [{store, type: 'put'|'del'|'patch'|'clear'|'delBike', value | id | patch}]
+   ops: [{store, type: 'put'|'del'|'patch'|'clear'|'delBike'|'adjust', value | id | patch}]
      delBike: Motorrad samt aller gespeicherten Einträge mit bike === id entfernen (Teile mit 'both' bleiben)
+     adjust (nur parts): {id, op, add, low, set} – Anzahl um add ändern (Ergebnis 0 … 99999), bei low danach
+       „nachkaufen ab“ mindestens auf den Bestand setzen, set: weitere Felder im selben Schritt (Name, Motorrad,
+       nachkaufen ab). op: feste Vorgangskennung; schon angewendet → nichts ändern (Ergebnis dup).
    opts.bump (Standard true): Änderungszähler für die Sicherungserinnerung erhöhen.
    opts.epoch: Bestandskennung, zu der der Vorgang gehört. Stimmt sie nicht mehr, wird nichts geschrieben.
-   Ergebnis: {changeSeq, removed: [{store, doc}]} oder Fehler {code}. */
+   Ergebnis: {changeSeq, removed: [{store, doc}], adjusted: [{id, doc, dup}]} oder Fehler {code}. */
+const LEDGER_MAX = 1000;
 const needsBike = o => {
   if (o.type === 'put') return !!o.value && (DEP.includes(o.store) || (o.store === 'parts' && o.value.bike !== 'both'));
   if (o.type === 'patch') return !!o.patch && Object.prototype.hasOwnProperty.call(o.patch, 'bike') && (DEP.includes(o.store) || (o.store === 'parts' && o.patch.bike !== 'both'));
+  if (o.type === 'adjust') return !!o.set && Object.prototype.hasOwnProperty.call(o.set, 'bike') && o.set.bike !== 'both';
   return false;
 };
+const bikeOfOp = o => o.type === 'put' ? o.value.bike : o.type === 'adjust' ? o.set.bike : o.patch.bike;
+const clampQty = n => Math.max(0, Math.min(99999, Math.round(Number(n) || 0)));
+/* Älteste Kennungen entfernen, damit der Eintrag klein bleibt */
+function pruneLedger(led){
+  const ids = Object.keys(led.ids);
+  if (ids.length <= LEDGER_MAX) return;
+  ids.sort((a, b) => led.ids[a] - led.ids[b]).slice(0, ids.length - LEDGER_MAX).forEach(k => { delete led.ids[k]; });
+}
 export function commit(ops, opts){
   opts = opts || {};
   return new Promise((resolve, reject) => {
     const stores = new Set(ops.map(o => o.store));
     const bump = opts.bump !== false && ops.some(o => REC.includes(o.store));
     const guard = typeof opts.epoch === 'string';
-    if (bump || guard) stores.add('meta');
+    const adj = ops.filter(o => o.type === 'adjust');
+    if (adj.some(o => o.store !== 'parts' || !validOp(o.op) || !Number.isInteger(o.add))) { reject({code: 'invalid', message: 'Ungültige Bestandsänderung'}); return; }
+    if (bump || guard || adj.length) stores.add('meta');
     if (ops.some(needsBike)) stores.add('bikes');
     if (ops.some(o => o.type === 'delBike')) REC.forEach(s => stores.add(s));
     let tx;
     try { tx = txOf(Array.from(stores), 'readwrite'); } catch (e) { reject(mapErr(e)); return; }
-    const t = T(), result = {removed: []};
+    const t = T(), result = {removed: [], adjusted: []};
     let injected = null, done = false;
     const fail = e => { if (!injected) injected = e; try { tx.abort(); } catch (_) {} };
     tx.oncomplete = () => {
@@ -183,12 +205,18 @@ export function commit(ops, opts){
     const run = () => {
       try {
         const putBikes = new Set(ops.filter(o => o.store === 'bikes' && o.type === 'put' && o.value).map(o => o.value.id));
+        /* Angewendete Bestandsänderungen zuerst lesen; die Anfragen danach sehen das Ergebnis (gleiche Reihenfolge) */
+        let led = null, adjLeft = adj.length;
+        if (adj.length) {
+          const lr = tx.objectStore('meta').get('ops');
+          lr.onsuccess = () => { const v = lr.result; led = (v && v.ids && typeof v.ids === 'object' && !Array.isArray(v.ids)) ? v : {k: 'ops', ids: {}}; };
+        }
         for (const o of ops) {
           if (!step()) return;
           const st = tx.objectStore(o.store);
           if (needsBike(o)) {
             /* Beziehung in derselben Transaktion prüfen: gibt es das Motorrad (noch)? */
-            const bid = o.type === 'put' ? o.value.bike : o.patch.bike;
+            const bid = bikeOfOp(o);
             if (!putBikes.has(bid)) {
               const c = tx.objectStore('bikes').count(bid);
               c.onsuccess = () => { if (!c.result) fail({code: 'orphan', message: o.store + ' → Motorrad ' + bid}); };
@@ -202,6 +230,22 @@ export function commit(ops, opts){
             r.onsuccess = () => {
               if (!r.result) { fail({code: 'not_found', message: o.store + '/' + o.id}); return; }
               st.put(Object.assign(r.result, o.patch));
+            };
+          } else if (o.type === 'adjust') {
+            const r = st.get(o.id);
+            r.onsuccess = () => {
+              if (injected) return;
+              if (led.ids[o.op]) result.adjusted.push({id: o.id, doc: r.result || null, dup: true});
+              else if (!r.result) { fail({code: 'not_found', message: o.store + '/' + o.id}); return; }
+              else {
+                const d = r.result;
+                d.qty = clampQty(clampQty(d.qty) + o.add);
+                if (o.set) Object.assign(d, o.set);
+                if (o.low) d.min = Math.max(clampQty(d.min), d.qty);
+                st.put(d); led.ids[o.op] = Date.now();
+                result.adjusted.push({id: o.id, doc: d, dup: false});
+              }
+              if (--adjLeft === 0) { pruneLedger(led); tx.objectStore('meta').put(led); }
             };
           } else if (o.type === 'delBike') {
             const g = st.get(o.id);

@@ -122,7 +122,7 @@ const P = {
 export const icon = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (P[n] || '') + '</svg>';
 
 /* ---------- Navigation ---------- */
-export const SECTIONS = [['status', 'Status'], ['defects', 'Mängel'], ['log', 'Logbuch'], ['rides', 'Fahrten'], ['setup', 'Setup', 'Fahrwerk-Setups'], ['garage', 'Garage'], ['manual', 'Handbuch', 'Handbuch', 'Handb.']];
+export const SECTIONS = [['status', 'Status'], ['defects', 'Mängel'], ['log', 'Logbuch', 'Logbuch', 'Log'], ['rides', 'Fahrten'], ['setup', 'Setup', 'Fahrwerk-Setups'], ['garage', 'Garage'], ['manual', 'Handbuch', 'Handbuch', 'Handb.']];
 export function parseRoute(h){
   h = String(h == null ? location.hash : h).replace(/^#/, '');
   const p = h.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch (e) { return ''; } });

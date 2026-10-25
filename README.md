@@ -145,7 +145,19 @@ Ein **Stichwort am Anfang** (auch nach dem Motorradnamen, mit oder ohne Doppelpu
 | Fahrt, Training | Fahrt | `Fahrt: 1,5 h Gotha` |
 | Wartung, Service, Erledigt | Wartung | `Wartung: Luftfilter` |
 
-**Ohne Stichwort:** Wörter wie „locker“, „undicht“, „quietscht“, „schwitzt“, „kaputt“, „funktioniert nicht“ ergeben einen Mangel, solange kein Erledigt-Wort wie „gespannt“ oder „getauscht“ dabeisteht. „Kette spannen“ (Grundform, ohne Erledigt-Wort) ist ein offener Punkt und wird ein Mangel, kein erledigter Service. „2 Stunden gefahren, Gabel schwitzt“ ergibt eine Fahrt und einen Mangel. Verneintes („Öl noch nicht gewechselt“) bleibt eine Notiz.
+**Ohne Stichwort:** Wörter wie „locker“, „undicht“, „quietscht“, „schwitzt“, „kaputt“, „funktioniert nicht“ ergeben einen Mangel, solange kein Erledigt-Wort wie „gespannt“ oder „getauscht“ dabeisteht. „Kette spannen“ (Grundform, ohne Erledigt-Wort) ist ein offener Punkt und wird ein Mangel, kein erledigter Service. „1,5 Stunden gefahren, Gabel schwitzt“ ergibt eine Fahrt über 1,5 Stunden und einen Mangel; Zahlen mit Komma oder Punkt bleiben dabei ganz. Verneintes („Öl noch nicht gewechselt“) bleibt eine Notiz.
+
+**Verneint oder geplant, auch mit Stichwort:** „Wartung“, „Service“, „Erledigt“, „Fahrt“ und „Training“ bestimmen nur die Art. Steht im Text eine Verneinung („nicht“, „noch nicht“, „kein“) oder etwas Geplantes („morgen“, „bald“, „sollte“, „muss“, „nächste Woche“ …), wird daraus nie eine erledigte Wartung oder Fahrt:
+
+| Eingabe | Ergebnis |
+|---|---|
+| `Wartung: Öl noch nicht gewechselt` | Notiz mit dem ganzen Text, Hinweis in der Vorschau |
+| `Wartung: morgen Öl wechseln` | offener Mangel „Morgen Öl wechseln“, Hinweis in der Vorschau |
+| `Fahrt: 2 Stunden, Bremse funktioniert nicht` | Fahrt über 2 Stunden (ein Schadenswort mit „nicht“ ist keine Verneinung) |
+
+Im Zweifel wird also nichts als erledigt eingetragen. War es doch erledigt, über „Bearbeiten“ ändern.
+
+**Teile:** „Gekauft“ und „Kaufen“ ändern einen vorhandenen Posten (gleicher Name, Groß-/Kleinschreibung egal), sonst entsteht ein neuer. „Bearbeiten“ öffnet dann das Teileformular für genau diesen Posten („Teil ändern“); die Anzahl dort ist der Bestand nach dem Speichern. Einkäufe und die Knöpfe + und − zählen um die Anzahl weiter, nicht auf eine feste Zahl: Kaufst du in zwei Fenstern gleichzeitig 2 und 3 Ölfilter dazu, stehen danach 5 mehr im Vorrat.
 
 ## 9. Mehrere Fenster
 
@@ -153,6 +165,7 @@ Racebook darf in mehreren Tabs oder Fenstern desselben Browsers offen sein. Änd
 
 - **Bestandskennung:** Jeder gespeicherte Bestand hat eine Kennung, die sich bei jedem Einspielen und Wiederherstellen ändert. Jeder Speichervorgang nennt die Kennung des Bestands, in dem er begonnen wurde. Stimmt sie nicht mehr, schreibt der Speicher nichts (geprüft in derselben Transaktion).
 - **Motorrad vorhanden:** Ein Eintrag, der zu einem Motorrad gehört, wird nur gespeichert, wenn es das Motorrad im Speicher gibt (ebenfalls in derselben Transaktion). Ein Motorrad wird mit allen tatsächlich gespeicherten Einträgen entfernt, auch mit solchen, die das Fenster noch nicht kennt.
+- **Teilebestand:** Einkäufe und + / − werden in der Transaktion auf den dann gespeicherten Bestand angewendet, jeweils genau einmal (feste Vorgangskennung). Gleichzeitige Änderungen in zwei Fenstern zählen beide; ein wiederholter Speicherversuch zählt nicht doppelt.
 
 Racebook möglichst nur an einer Stelle offen halten (installierte App oder Browser). Hängt ein Speichervorgang länger als etwa 4 Sekunden, zeigt Racebook einen Hinweis, dass vermutlich ein anderes Fenster den Speicher blockiert.
 
