@@ -13,7 +13,9 @@ export const WEATHER = ['sonnig','bewölkt','Nieselregen','Regen','staubig','kal
 export const FLUIDS = [['motor','Motoröl'],['fork','Gabelöl'],['coolant','Kühlflüssigkeit'],['brake','Bremsflüssigkeit'],['airfilter','Luftfilteröl'],['chain','Kettenspray']];
 export const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
 export const NUMW = {ein:1,eine:1,einer:1,einen:1,eins:1,zwei:2,drei:3,vier:4,'fünf':5,fuenf:5,sechs:6,sieben:7,acht:8,neun:9,zehn:10,elf:11,'zwölf':12,halbe:0.5,anderthalb:1.5,eineinhalb:1.5,zweieinhalb:2.5,dreieinhalb:3.5};
-export const LOG_KINDS = ['service','tire','chain','note','reading'];
+export const LOG_KINDS = ['service','tire','chain','note','reading','meter'];
+/* Rückfrage vor dem Speichern, wenn ein Stand um mehr als so viel über dem bisherigen liegt */
+export const JUMP = {h: 20, km: 2000};
 export const LIM = {h: {cnt: 100000, ride: 24}, km: {cnt: 9999999, ride: 3000}};
 export const MAX_COST = 100000;
 /* Version 5 ging am 23.10.2026 um 08:45 Uhr online (1792737909 s). Bis dahin hat die App das Feld
@@ -26,9 +28,14 @@ const V5_MS = 1792737909000;
 const V8_BACKUP_VERSION = 3;
 export const ZIP_FORMAT = 'racebook-backup';
 /* Sicherungsformat: 4 = Standard. 5 = wie 4, zusätzlich der Teil „verwaist“ (Einträge ohne Motorrad aus einer
-   früheren Version). Ohne solche Einträge schreibt die App weiter Version 4. */
-export const ZIP_VERSION = 5;
+   früheren Version). 6 = Logbuch enthält Zählerwechsel (kind 'meter', Feld meterNew) oder berichtigte Stände
+   (Feld fix); ältere Versionen lehnen sie als „neuer“ ab, statt diese Angaben still zu verlieren.
+   Ohne solche Einträge schreibt die App weiter Version 4 bzw. 5. */
+export const ZIP_VERSION = 6;
+export const ZIP_VERSION_ORPH = 5;
 export const ZIP_VERSION_PLAIN = 4;
+/* Enthält der Bestand Angaben, die erst ab Sicherungsversion 6 lesbar sind? */
+export const needsV6 = next => Object.values((next && next.log) || {}).some(l => l && (l.kind === 'meter' || l.fix != null));
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
 const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
@@ -120,7 +127,9 @@ export function colorOf(b){
   if (b && /^#[0-9a-f]{6}$/i.test(b.color || '')) return b.color;
   const br = brandOf(b); if (br) return br.c;
   if (b && b.color === 'husky') return '#1F3F8F';
-  return '#E3620C';
+  if (b && b.color === 'ktm') return '#E3620C';
+  /* Ohne Marke und ohne gewählte Farbe: neutrales Grau, keine Markenfarbe */
+  return '#5B6670';
 }
 export function darkFill(c){ return contrast(c, '#191D22') < 2.4 ? towards(c, '#E4E7E2', '#191D22', 2.6) : c; }
 export function plateOf(b){
@@ -193,16 +202,32 @@ export function cleanSnap(x, h){
   SF.forEach(([, k, l, r]) => { o[k] = h.n(x[k], 'Setup-Kopie ' + l, {int:r.int, min:r.min, max:r.max}); });
   return o;
 }
+export const FIX_HOW = ['tippfehler', 'festgehalten'];
+function cleanFix(v, h){
+  v = h.o(v, 'Berichtigung');
+  const how = h.one(v.how, 'Berichtigung', FIX_HOW, null), from = h.n(v.from, 'Berichtigung (alter Stand)', {min:0, max:1e7});
+  if (!how || from == null) { h.fail('Berichtigung', 'ist unvollständig.'); return null; }
+  return {how, from, t: h.n(v.t, 'Berichtigung (Zeit)', {int:true, min:0}) || 0, op: validId(v.op) ? v.op : ''};
+}
 export function cleanDoc(coll, x, strict, where){
   if (coll === 'bikes') return cleanBike(x, strict, where);
   const h = H(strict, where); x = h.o(x, 'Eintrag');
   const bike = h.id(x.bike, 'Motorrad');
-  if (coll === 'log') return {bike, kind: h.one(x.kind, 'Art', LOG_KINDS, 'note'), date: h.d(x.date, 'Datum', {req:true}) || '',
+  if (coll === 'log') {
+    const d = {bike, kind: h.one(x.kind, 'Art', LOG_KINDS, 'note'), date: h.d(x.date, 'Datum', {req:true}) || '',
     at: h.n(x.at, 'Stand', {min:0, max:1e7}), atAuto: x.atAuto === true ? true : (x.atAuto === false ? false : null), correction: x.correction === true,
     tasks: h.a(x.tasks, 'Arbeiten').filter(validId).slice(0, 50), taskNames: h.a(x.taskNames, 'Arbeiten').filter(t => typeof t === 'string').map(t => t.slice(0, 120)).slice(0, 50),
     extra: h.s(x.extra, 'Weitere Arbeiten', {max:500}), title: h.s(x.title, 'Titel', {max:300}), cost: h.n(x.cost, 'Kosten', {min:0, max:1e6}),
     note: h.s(x.note, 'Notiz', {max:4000}), created: h.n(x.created, 'Zeitstempel', {int:true, min:0}) || 0,
     photoId: validId(x.photoId) ? x.photoId : '', thumbId: validId(x.thumbId) ? x.thumbId : '', repairOf: validId(x.repairOf) ? x.repairOf : ''};
+    /* Neue Felder nur, wenn benutzt: bestehende Einträge bleiben exakt gleich.
+       meterNew (nur Zählerwechsel): Anzeige des neuen Zählers; at = letzter Stand des alten Zählers.
+       fix: Stand bei einer Tippfehler-Berichtigung geändert ({how: 'tippfehler', from: alter Wert}) oder als
+       automatisch berechneter Wert festgehalten ({how: 'festgehalten', from: Wert}); t = Zeitpunkt, op = Vorgang */
+    if (d.kind === 'meter') { d.meterNew = h.n(x.meterNew, 'Neuer Zählerstand', {min:0, max:1e7}); if (d.meterNew == null) { h.fail('Neuer Zählerstand', 'fehlt.'); d.meterNew = 0; } }
+    if (x.fix != null) { const fx = cleanFix(x.fix, h); if (fx) d.fix = fx; }
+    return d;
+  }
   if (coll === 'rides') return {bike, date: h.d(x.date, 'Datum', {req:true}) || '', track: h.s(x.track, 'Strecke', {max:120}),
     amount: h.n(x.amount, 'Fahrzeit', {gt:0, max:LIM.km.ride}), ground: h.s(x.ground, 'Boden', {max:40}), weather: h.s(x.weather, 'Wetter', {max:40}),
     setupId: h.id(x.setupId, 'Setup', {opt:true}), setupSnap: cleanSnap(x.setupSnap, h), feel: h.n(x.feel, 'Gefühl', {int:true, min:1, max:5}), inReading: x.inReading === true,
@@ -227,79 +252,120 @@ export const cmpEv = (x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0) 
 /* Wartung mit eingetipptem Stand = Messpunkt. Ohne Stand: heute erfasst (atAuto) oder Altbestand = aus dem Verlauf; sonst unbekannt. */
 export const isMeasured = l => l.at != null && l.atAuto !== true;
 export const isDerivedAt = l => l.atAuto === true || (l.atAuto === null && l.at == null);
-export const hasSetOn = (bid, date) => S.log.some(l => l.bike === bid && l.date === date && (l.kind === 'reading' ? l.at != null : (l.kind === 'service' && isMeasured(l))));
+export const hasSetOn = (bid, date) => S.log.some(l => l.bike === bid && l.date === date && (l.kind === 'reading' ? l.at != null : (l.kind === 'meter' || (l.kind === 'service' && isMeasured(l)))));
 /* Stelle eines alten, hochgezählten Stands im Verlauf: hinter allen Einträgen, die er schon enthält
    (alle bis currentT bzw. alle von vor Version 5), unabhängig von deren Fahrdatum (siehe V5_MS) */
-export function legacyPos(b){
+export function legacyPos(b, logs, rides){
   const lim = b.currentT != null ? b.currentT : V5_MS - 1;
-  const own = S.log.filter(l => l.bike === b.id && l.created <= lim).concat(S.rides.filter(r => r.bike === b.id && r.created <= lim));
+  const own = (logs || S.log).filter(l => l.bike === b.id && l.created <= lim).concat((rides || S.rides).filter(r => r.bike === b.id && r.created <= lim));
   let t = b.currentT != null ? b.currentT : 0, date = '';
   own.forEach(x => { if (b.currentT == null && x.created > t) t = x.created; if (isISO(x.date) && x.date > date) date = x.date; });
   if (t) { const dt = dateOfMs(t); if (dt > date) date = dt; }
   return {date: date || '0000-00-00', c: t + 0.5};
 }
+const r2 = v => Math.round(v * 100) / 100;
+/* Verlauf eines Motorrads (rein: arbeitet auch mit geänderten Listen, z. B. für die Vorschau einer Berichtigung).
+   Alle Werte im Verlauf sind Gesamtlaufleistung. off = Gesamtlaufleistung minus Anzeige des eingebauten Zählers;
+   off ändert sich nur bei einem Zählerwechsel (kind 'meter': at = letzter Stand des alten Zählers, meterNew =
+   Anzeige des neuen). Eingetippte Stände sind immer Anzeigen; ohne Zählerwechsel ist beides gleich.
+   Ergebnis: cur = Anzeige jetzt, tot = Gesamtlaufleistung jetzt, items = letzte Wartung je Punkt
+   ({at: Gesamt, disp: Anzeige damals, date, …}), ev = Ereignisse mit prev/tot/off, probe/poff je Eintrag. */
+export function deriveBike(b, logs, rides){
+  logs = logs || S.log; rides = rides || S.rides;
+  const ev = [];
+  if (b.current != null) { const lp = legacyPos(b, logs, rides); ev.push({date: lp.date, ph: 1, c: lp.c, id: '', k: 'set', v: b.current, legacy: true}); }
+  logs.forEach(l => {
+    if (l.bike !== b.id) return;
+    const base = {date: l.date || '', ph: 1, c: l.created || 0, id: l.id, probe: true};
+    if (l.kind === 'reading' && l.at != null) ev.push(Object.assign(base, {k: 'set', v: l.at, src: 'reading'}));
+    else if (l.kind === 'service' && isMeasured(l)) ev.push(Object.assign(base, {k: 'set', v: l.at, src: 'service'}));
+    else if (l.kind === 'service' && isDerivedAt(l)) ev.push(Object.assign(base, {k: 'probe'}));
+    else if (l.kind === 'meter') ev.push(Object.assign(base, {k: 'meter', v: l.at, nv: l.meterNew || 0}));
+  });
+  rides.forEach(r => { if (r.bike === b.id && r.amount != null && r.amount > 0) ev.push({date: r.date || '', ph: r.inReading ? 0 : 1, c: r.created || 0, id: r.id, k: 'add', v: r.amount}); });
+  ev.sort(cmpEv);
+  let cur = null, off = 0; const probe = {}, poff = {};
+  ev.forEach(e => {
+    e.prev = cur;
+    if (e.k === 'set') cur = off ? r2(e.v + off) : e.v;
+    else if (e.k === 'add') { if (cur != null) cur = r2(cur + e.v); }
+    else if (e.k === 'meter') {
+      /* Ohne bekannten alten Stand gibt es keine Gesamtlaufleistung zu erhalten: dann zählt der neue Zähler wie bisher */
+      const tot = e.v != null ? (off ? r2(e.v + off) : e.v) : cur;
+      if (tot != null) { cur = tot; off = r2(tot - e.nv); }
+    }
+    e.tot = cur; e.off = off;
+    if (e.probe) { probe[e.id] = cur; poff[e.id] = off; }
+  });
+  /* Startwert aus den Intervallen: Anzeige am Startdatum (ohne Datum: vor allem anderen) */
+  const offEnd = date => { let o = 0; const key = {date, ph: 2, c: 0, id: ''}; for (const e of ev) { if (cmpEv(e, key) >= 0) break; o = e.off; } return o; };
+  const items = {};
+  (b.items || []).forEach(it => {
+    let best = null;
+    if (it.lastAt != null || it.lastDate) {
+      const o = it.lastAt != null && it.lastDate ? offEnd(it.lastDate) : 0;
+      best = {at: it.lastAt != null ? (o ? r2(it.lastAt + o) : it.lastAt) : null, disp: it.lastAt, date: it.lastDate || null, src: 'base', key: (it.lastDate || '') + '|0'};
+    }
+    logs.forEach(l => {
+      if (l.bike !== b.id || l.kind !== 'service' || !isISO(l.date) || !l.tasks.includes(it.id)) return;
+      const key = l.date + '|' + String(l.created || 0).padStart(15, '0');
+      if (best && key <= best.key) return;
+      const v = (isMeasured(l) || isDerivedAt(l)) && probe[l.id] != null ? probe[l.id] : null;
+      best = {at: v, disp: v == null ? null : (poff[l.id] ? r2(v - poff[l.id]) : v), date: l.date, src: 'log', auto: isDerivedAt(l), id: l.id, key};
+    });
+    items[it.id] = best;
+  });
+  return {cur: cur == null ? null : (off ? r2(cur - off) : cur), tot: cur, off, items, ev, probe, poff};
+}
 export function derive(){
   const der = {};
-  Object.values(S.bikes).forEach(b => {
-    const ev = [];
-    if (b.current != null) { const lp = legacyPos(b); ev.push({date: lp.date, ph: 1, c: lp.c, id: '', k: 'set', v: b.current}); }
-    S.log.forEach(l => {
-      if (l.bike !== b.id) return;
-      const base = {date: l.date || '', ph: 1, c: l.created || 0, id: l.id};
-      if (l.kind === 'reading' && l.at != null) ev.push(Object.assign(base, {k: 'set', v: l.at, probe: true}));
-      else if (l.kind === 'service' && isMeasured(l)) ev.push(Object.assign(base, {k: 'set', v: l.at, probe: true}));
-      else if (l.kind === 'service' && isDerivedAt(l)) ev.push(Object.assign(base, {k: 'probe', probe: true}));
-    });
-    S.rides.forEach(r => { if (r.bike === b.id && r.amount != null && r.amount > 0) ev.push({date: r.date || '', ph: r.inReading ? 0 : 1, c: r.created || 0, id: r.id, k: 'add', v: r.amount}); });
-    ev.sort(cmpEv);
-    let cur = null; const probe = {};
-    ev.forEach(e => {
-      if (e.k === 'set') cur = e.v;
-      else if (e.k === 'add' && cur != null) cur = Math.round((cur + e.v) * 100) / 100;
-      if (e.probe) probe[e.id] = cur;
-    });
-    const atOf = l => isMeasured(l) ? l.at : (isDerivedAt(l) && probe[l.id] != null ? probe[l.id] : null);
-    const items = {};
-    (b.items || []).forEach(it => {
-      let best = (it.lastAt != null || it.lastDate) ? {at: it.lastAt, date: it.lastDate || null, src: 'base', key: (it.lastDate || '') + '|0'} : null;
-      S.log.forEach(l => {
-        if (l.bike !== b.id || l.kind !== 'service' || !isISO(l.date) || !l.tasks.includes(it.id)) return;
-        const key = l.date + '|' + String(l.created || 0).padStart(15, '0');
-        if (!best || key > best.key) best = {at: atOf(l), date: l.date, src: 'log', auto: isDerivedAt(l), id: l.id, key};
-      });
-      items[it.id] = best;
-    });
-    der[b.id] = {cur, items, ev, probe};
-  });
+  Object.values(S.bikes).forEach(b => { der[b.id] = deriveBike(b); });
   S.der = der;
 }
+/* Anzeige des eingebauten Zählers jetzt; Gesamtlaufleistung; Abstand zwischen beiden (nach einem Zählerwechsel) */
 export const curOf = b => (b && S.der[b.id]) ? S.der[b.id].cur : null;
-export const markOf = (b, it) => (b && S.der[b.id] && S.der[b.id].items[it.id]) || null;
-/* Stand einer Wartung zur Anzeige: gemessen, aus dem Verlauf oder unbekannt */
+export const totOf = b => (b && S.der[b.id]) ? S.der[b.id].tot : null;
+export const offOf = b => (b && S.der[b.id]) ? S.der[b.id].off : 0;
+export const markOf = (b, it, d) => { d = d || (b && S.der[b.id]); return (d && d.items[it.id]) || null; };
+/* Stand einer Wartung zur Anzeige: gemessen, aus dem Verlauf oder unbekannt. v = Anzeige damals, tot = Gesamt */
 export function svcAtOf(l){
-  if (l.kind !== 'service') return {v: l.at, src: l.at == null ? 'unk' : 'mess'};
-  if (isMeasured(l)) return {v: l.at, src: 'mess'};
-  if (isDerivedAt(l)) { const d = S.der[l.bike]; return {v: d && d.probe[l.id] != null ? d.probe[l.id] : null, src: 'auto'}; }
-  return {v: null, src: 'unk'};
+  if (l.kind !== 'service') return {v: l.at, tot: null, src: l.at == null ? 'unk' : 'mess'};
+  const d = S.der[l.bike], tot = d && d.probe[l.id] != null ? d.probe[l.id] : null;
+  if (isMeasured(l)) return {v: l.at, tot, src: 'mess'};
+  if (isDerivedAt(l)) return {v: tot == null ? null : (d.poff[l.id] ? r2(tot - d.poff[l.id]) : tot), tot, src: 'auto'};
+  return {v: null, tot: null, src: 'unk'};
 }
-/* Berechneter Stand an einer Stelle im Verlauf (vor einem neuen Eintrag mit Datum und Erfassungszeit) */
-export function valueAt(bid, date, c){
-  const d = S.der[bid]; if (!d) return null;
+/* Berechneter Stand an einer Stelle im Verlauf (vor einem neuen Eintrag mit Datum und Erfassungszeit):
+   tot = Gesamtlaufleistung, off = Abstand zur Anzeige, disp = Anzeige des damals eingebauten Zählers */
+export function posAt(bid, date, c, d){
+  d = d || S.der[bid]; if (!d) return {tot: null, off: 0, disp: null};
   const key = {date, ph: 1, c, id: '￿'};
-  let cur = null;
-  for (const e of d.ev) { if (cmpEv(e, key) >= 0) break; if (e.k === 'set') cur = e.v; else if (e.k === 'add' && cur != null) cur = Math.round((cur + e.v) * 100) / 100; }
-  return cur;
+  let tot = null, off = 0;
+  for (const e of d.ev) { if (cmpEv(e, key) >= 0) break; tot = e.tot; off = e.off; }
+  return {tot, off, disp: tot == null ? null : (off ? r2(tot - off) : tot)};
+}
+export const valueAt = (bid, date, c) => posAt(bid, date, c).disp;
+/* Auffälliger Sprung nach oben gegenüber dem passenden bisherigen Stand (Anzeige)? Ergebnis: Text der Rückfrage oder '' */
+export function jumpText(b, at, prev){
+  if (at == null || prev == null) return '';
+  const diff = r2(at - prev), u = U(b);
+  if (!(diff > JUMP[u === 'km' ? 'km' : 'h'] + 1e-9)) return '';
+  return fmt(at, 2) + ' ' + u + ' übernehmen? Bisheriger Stand: ' + fmt(prev, 2) + ' ' + u + '. Das sind ' + fmt(diff, 2) + ' ' + u + ' mehr.';
 }
 /* ---------- Wartungslogik ---------- */
-export function itemState(b, it){
-  const m = markOf(b, it), cur = curOf(b);
+export function itemState(b, it, d){
+  d = d || (b && S.der[b.id]) || null;
+  const m = d ? (d.items[it.id] || null) : null, cur = d ? d.tot : null;
   const lastAt = m ? m.at : null, lastDate = m ? m.date : null;
   let remain = null, frac = null, days = null, dfrac = null;
-  if (it.every && lastAt != null && cur != null) { remain = Math.round((lastAt + it.every - cur) * 100) / 100; frac = remain / it.every; }
   if (it.months && isISO(lastDate)) {
     days = dayNum(addMonths(lastDate, it.months)) - dayNum(todayISO());
     dfrac = days / (it.months * 30.44);
   }
+  /* Widerspruch: die letzte Wartung steht bei mehr als dem heutigen Stand (meist nach einem Tippfehler).
+     Dann keine Restlaufzeit ausrechnen, sondern zum Prüfen auffordern. */
+  if (it.every && lastAt != null && cur != null && lastAt > cur + 0.005) return {s:'chk', used:0, remain: null, days, f: -1, frac: null, dfrac, m};
+  if (it.every && lastAt != null && cur != null) { remain = Math.round((lastAt + it.every - cur) * 100) / 100; frac = remain / it.every; }
   if (frac == null && dfrac == null) return {s:'unk', used:0, remain, days, f:Infinity, m};
   const f = Math.min(frac == null ? Infinity : frac, dfrac == null ? Infinity : dfrac);
   let s = 'ok';
@@ -314,6 +380,7 @@ export function itemState(b, it){
 export function pillText(b, st){
   const u = U(b);
   const useHours = st.frac != null && (st.dfrac == null || st.frac <= st.dfrac);
+  if (st.s === 'chk') return 'Wartungsstand prüfen';
   if (st.s === 'unk') return 'Stand unbekannt';
   if (useHours) {
     if (st.remain <= 0) return st.remain === 0 ? 'jetzt fällig' : fmt(-st.remain) + ' ' + u + ' drüber';
@@ -323,10 +390,10 @@ export function pillText(b, st){
   if (st.days > 75) return 'noch ' + Math.round(st.days / 30.44) + ' Mon.';
   return 'noch ' + st.days + ' Tage';
 }
-export function sortedItems(b){
-  const rank = {bad:0, warn:1, ok:2, unk:3};
-  return (b.items || []).map(it => ({it, st: itemState(b, it)}))
-    .sort((x, y) => (rank[x.st.s] - rank[y.st.s]) || (x.st.f - y.st.f));
+export const STATE_RANK = {bad:0, chk:1, warn:2, ok:3, unk:4};
+export function sortedItems(b, d){
+  return (b.items || []).map(it => ({it, st: itemState(b, it, d)}))
+    .sort((x, y) => (STATE_RANK[x.st.s] - STATE_RANK[y.st.s]) || (x.st.f - y.st.f));
 }
 /* Stand einer Wartung: eingetippt = Messpunkt; heute leer = aus dem Verlauf (kein gespeicherter Wert,
    wird bei jeder Änderung neu berechnet); rückdatiert leer = unbekannt */
@@ -735,6 +802,7 @@ export function validateV8Backup(d){
     if (d.version > V8_BACKUP_VERSION) throw new Error('Die Sicherung stammt aus einer neueren Racebook-Version (' + d.version + ') und kann hier nicht gelesen werden.');
   }
   if (!Array.isArray(d.motorraeder)) throw new Error('In der Sicherung fehlen die Motorräder.');
+  if ((Array.isArray(d.logbuch) ? d.logbuch : []).some(l => l && typeof l === 'object' && (l.kind === 'meter' || l.fix != null))) throw new Error('Die Sicherung ist beschädigt (unbekannte Einträge im Logbuch).');
   const missing = [];
   const arr = v => Array.isArray(v) ? v.map(x => (x && typeof x === 'object' && !Array.isArray(x)) ? Object.assign({}, x) : x) : v;
   const map = {bikes: arr(d.motorraeder), log: arr(d.logbuch), rides: arr(d.fahrten), setups: arr(d.fahrwerk), parts: arr(d.teile), defects: []};
@@ -771,6 +839,8 @@ export function validateZipJson(d){
   if (!Number.isInteger(d.version) || d.version < 4) throw new Error('Die Sicherungsversion ist unbekannt.');
   if (d.version > ZIP_VERSION) throw new Error('Die Sicherung stammt aus einer neueren Racebook-Version (' + d.version + ') und kann hier nicht gelesen werden. Bitte die App aktualisieren.');
   if (d.version < 5 && d.verwaist != null) throw new Error('Die Sicherung ist beschädigt (unerwarteter Teil „verwaist“).');
+  const logs = [].concat(Array.isArray(d.logbuch) ? d.logbuch : [], d.verwaist && Array.isArray(d.verwaist.logbuch) ? d.verwaist.logbuch : []);
+  if (d.version < 6 && logs.some(l => l && typeof l === 'object' && (l.kind === 'meter' || l.fix != null))) throw new Error('Die Sicherung ist beschädigt (Zählerwechsel oder Berichtigungen in einer Sicherung vor Version 6).');
   const map = {}; COLLS.forEach(k => { map[k] = d[KEYS[k]]; });
   const next = strictCollections(map);
   const orphans = strictOrphans(d.verwaist, next);
@@ -802,24 +872,156 @@ export function validateZipJson(d){
 }
 
 /* ---------- Übersicht: Zustand je Motorrad ---------- */
-export const STATE_TEXT = {ok: 'in Ordnung', warn: 'bald fällig', bad: 'überfällig', unk: 'Stand unbekannt', none: 'keine Wartungspunkte'};
+export const STATE_TEXT = {ok: 'in Ordnung', warn: 'bald fällig', bad: 'überfällig', chk: 'Wartungsstand prüfen', unk: 'Stand unbekannt', none: 'keine Wartungspunkte'};
 export const openDefects = bid => S.defects.filter(d => d.bike === bid && d.status !== 'done');
 export function bikeStatus(b){
   const list = sortedItems(b);
-  const n = {bad: 0, warn: 0, ok: 0, unk: 0};
+  const n = {bad: 0, chk: 0, warn: 0, ok: 0, unk: 0};
   list.forEach(x => { n[x.st.s]++; });
-  const state = !list.length ? 'none' : n.bad ? 'bad' : n.warn ? 'warn' : n.unk ? 'unk' : 'ok';
+  const state = !list.length ? 'none' : n.bad ? 'bad' : n.chk ? 'chk' : n.warn ? 'warn' : n.unk ? 'unk' : 'ok';
   /* Nächste Wartung: dringendster Punkt mit bekannter Grundlage; ohne Grundlage keine Restangabe */
   const known = list.find(x => x.st.s !== 'unk') || null;
   const nextItem = known ? {name: known.it.name, s: known.st.s, text: pillText(b, known.st)} : null;
   const defs = openDefects(b.id);
-  return {state, text: STATE_TEXT[state], cur: curOf(b), unit: U(b), counts: n, next: nextItem,
-    unknown: n.unk, defects: defs.length, defectsHigh: defs.filter(d => d.priority === 'high').length};
+  return {state, text: STATE_TEXT[state], cur: curOf(b), tot: totOf(b), off: offOf(b), unit: U(b), counts: n, next: nextItem,
+    unknown: n.unk, check: n.chk, defects: defs.length, defectsHigh: defs.filter(d => d.priority === 'high').length};
 }
 export function garageSummary(){
   const bikes = bikeList();
-  let overdue = 0, soon = 0, unknown = 0;
-  bikes.forEach(b => { const st = bikeStatus(b); overdue += st.counts.bad; soon += st.counts.warn; unknown += st.counts.unk; });
+  let overdue = 0, soon = 0, unknown = 0, check = 0;
+  bikes.forEach(b => { const st = bikeStatus(b); overdue += st.counts.bad; soon += st.counts.warn; unknown += st.counts.unk; check += st.counts.chk; });
   const defects = S.defects.filter(d => d.status !== 'done' && S.bikes[d.bike]).length;
-  return {bikes: bikes.length, overdue, soon, unknown, defects};
+  return {bikes: bikes.length, overdue, soon, unknown, check, defects};
+}
+
+/* ---------- Tippfehler berichtigen ----------
+   Ausgangslage: ein niedrigerer Stand (neu eingegeben oder schon im Verlauf, z. B. als Korrektur gespeichert)
+   folgt auf einen zu hohen. Die falsche Ablesung W ist der letzte eingetragene Stand davor (gleicher Zähler).
+   Sie bekommt den Wert, der zum niedrigeren Stand passt: niedriger Stand minus alles, was seitdem gefahren wurde.
+   Davor liegende Stände, die ebenfalls zu hoch wären, und alle Wartungen dazwischen werden angezeigt:
+   - aus dem Verlauf (kein gespeicherter Wert): ergeben sich neu, vorausgewählt; abwählen = alten Wert festhalten
+   - von Hand eingetippt oder Herkunft unklar (ältere Daten): nur nach ausdrücklicher Entscheidung
+   Nicht angeboten, wenn der Ausgangswert ein alter, hochgezählter Stand ohne eigenen Eintrag ist, ein
+   Zählerwechsel dazwischen liegt oder das Ergebnis unter 0 läge.
+   target: {value, date, c} = neuer Stand (wird nicht zusätzlich gespeichert) oder {id} = vorhandener Eintrag. */
+const logName = l => !l ? 'Eintrag' : l.kind === 'reading' ? 'Ablesung' : l.kind === 'service' ? ([].concat(l.taskNames || [], l.extra ? [l.extra] : []).join(', ') || 'Wartung') : 'Eintrag';
+export function fixPlan(b, logs, rides, target){
+  logs = logs || S.log; rides = rides || S.rides;
+  const d = deriveBike(b, logs, rides), ev = d.ev, byId = {};
+  logs.forEach(l => { if (l.bike === b.id) byId[l.id] = l; });
+  let idx, vt, C = null;
+  if (target.id) {
+    idx = ev.findIndex(e => e.id === target.id && e.k === 'set' && !e.legacy);
+    if (idx < 0) return null;
+    C = ev[idx]; vt = C.v;
+  } else {
+    const key = {date: target.date, ph: 1, c: target.c, id: '￿'};
+    idx = ev.findIndex(e => cmpEv(e, key) >= 0); if (idx < 0) idx = ev.length;
+    vt = target.value;
+  }
+  if (vt == null) return null;
+  let adds = 0, j = idx - 1; const autos = [];
+  for (; j >= 0; j--) { const e = ev[j]; if (e.k === 'add') adds = r2(adds + e.v); else if (e.k === 'probe') autos.push(e); else break; }
+  if (j < 0) return null;
+  const W = ev[j];
+  if (W.k !== 'set' || W.legacy || !byId[W.id]) return null;
+  const off = W.off, wDisp = r2(vt - adds);
+  if (wDisp < 0) return null;
+  const wTot = off ? r2(wDisp + off) : wDisp;
+  if (!(W.tot > wTot + 0.005)) return null;
+  /* Weitere zu hohe Stände direkt davor (z. B. dieselbe falsche Zahl auch bei einer Wartung eingetippt) */
+  const earlier = []; let need = wTot, adds2 = 0, pend = [];
+  for (let k = j - 1; k >= 0; k--) {
+    const e = ev[k];
+    if (e.k === 'add') { adds2 = r2(adds2 + e.v); continue; }
+    if (e.k === 'probe') { pend.push(e); continue; }
+    if (e.k !== 'set' || e.legacy || !byId[e.id]) break;
+    const eTot = r2(need - adds2);
+    if (eTot < 0 || !(e.tot > eTot + 0.005)) break;
+    autos.push(...pend); pend = [];
+    earlier.push({e, tot: eTot}); need = eTot; adds2 = 0;
+  }
+  const disp = (tot, o) => o ? r2(tot - o) : tot;
+  const kindOf = l => l.kind === 'reading' ? 'manual' : (l.atAuto === false ? 'manual' : 'unclear');
+  /* Alle zu hohen Stände, jüngster zuerst. Die falsche Ablesung ist die jüngste Ablesung darunter: sie wird berichtigt
+     (darum geht es). Eingetippte Stände bei Wartungen, weitere Ablesungen und unklare ältere Werte nur nach Entscheidung.
+     Gibt es keine Ablesung darunter, ist der jüngste Stand der Ausgangspunkt, ebenfalls nur nach Entscheidung. */
+  const group = [{e: W, tot: wTot}].concat(earlier);
+  const asRow = x => { const l = byId[x.e.id]; return {id: l.id, kind: kindOf(l), what: logName(l), date: l.date, old: x.e.v, proposed: disp(x.tot, off), src: l.kind}; };
+  const si = group.findIndex(x => byId[x.e.id].kind === 'reading');
+  const subject = si >= 0 ? Object.assign(asRow(group[si]), {kind: 'subject'}) : asRow(group[0]);
+  const rows = [];
+  if (si < 0) rows.push(subject);
+  group.forEach((x, i) => { if (i !== si && (si >= 0 || i > 0)) rows.push(asRow(x)); });
+  autos.forEach(e => { const l = byId[e.id]; if (l) rows.push({id: l.id, kind: 'auto', what: logName(l), date: l.date, old: disp(e.tot, e.off), proposed: null, src: l.kind}); });
+  rows.sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : 0) || ((byId[y.id].created || 0) - (byId[x.id].created || 0)));
+  return {bike: b.id, mode: C ? 'existing' : 'new', target: C ? {id: C.id} : {value: vt, date: target.date, c: target.c}, value: vt,
+    subject, rows, cur: d.cur, unit: U(b), id: C ? C.id : null, corrOf: C && byId[C.id] && byId[C.id].correction ? C.id : null};
+}
+/* Was eine Berichtigung mit den gewählten Entscheidungen speichert, und wie es danach aussieht.
+   choice: {auto: {id: true/false}, dec: {id: 'fix'|'keep'}}. Ergebnis: patches [{id, patch}], reading (zusätzliche
+   Ablesung, nur wenn behaltene Werte den neuen Stand sonst nicht erreichen ließen), der (Verlauf danach), proposed je Zeile. */
+export function fixResult(b, logs, rides, plan, choice, stamp){
+  logs = logs || S.log; rides = rides || S.rides;
+  const fx = (from) => ({how: 'tippfehler', from, t: stamp.t, op: stamp.op});
+  const patches = [];
+  const decided = r => r.kind === 'subject' || (r.kind === 'auto' ? true : (choice.dec[r.id] === 'fix' || choice.dec[r.id] === 'keep'));
+  const open = plan.rows.filter(r => !decided(r)).length;
+  if (plan.subject.kind === 'subject') patches.push({id: plan.subject.id, patch: {at: plan.subject.proposed, fix: fx(plan.subject.old)}});
+  plan.rows.forEach(r => {
+    if (r.kind === 'manual' || r.kind === 'unclear') { if (choice.dec[r.id] === 'fix') patches.push({id: r.id, patch: {at: r.proposed, fix: fx(r.old)}}); }
+    else if (r.kind === 'auto' && choice.auto[r.id] === false) patches.push({id: r.id, patch: {at: r.old, atAuto: false, fix: {how: 'festgehalten', from: r.old, t: stamp.t, op: stamp.op}}});
+  });
+  const apply = list => list.map(l => { const p = patches.find(x => x.id === l.id); return p ? Object.assign({}, l, p.patch) : l; });
+  let next = apply(logs);
+  let d2 = deriveBike(b, next, rides);
+  let reading = null;
+  if (plan.mode === 'new') {
+    const pos = posAt(b.id, plan.target.date, plan.target.c, d2);
+    if (pos.disp != null && Math.abs(pos.disp - plan.value) > 0.005) {
+      reading = {bike: b.id, kind: 'reading', date: plan.target.date, at: plan.value, atAuto: false, correction: pos.disp > plan.value, tasks: [], taskNames: [], extra: '', cost: null, note: '', created: plan.target.c};
+      next = next.concat([Object.assign({id: '￿neu'}, reading)]);
+      d2 = deriveBike(b, next, rides);
+    }
+  } else if (plan.corrOf) {
+    /* Die bisherige Korrektur ist danach keine mehr, wenn der Stand davor jetzt passt */
+    const e = d2.ev.find(x => x.id === plan.corrOf);
+    if (e && e.prev != null && Math.abs(e.prev - e.tot) <= 0.005) patches.push({id: plan.corrOf, patch: {correction: false}});
+  }
+  const proposed = {};
+  plan.rows.forEach(r => {
+    const p = patches.find(x => x.id === r.id);
+    if (r.kind === 'auto') proposed[r.id] = p ? r.old : (d2.probe[r.id] != null ? (d2.poff[r.id] ? r2(d2.probe[r.id] - d2.poff[r.id]) : d2.probe[r.id]) : null);
+    else proposed[r.id] = p ? p.patch.at : r.old;
+  });
+  /* Fälligkeit danach je betroffener Wartung (für die Punkte, deren letzte Wartung dieser Eintrag ist) */
+  const due = {};
+  plan.rows.forEach(r => {
+    const l = logs.find(x => x.id === r.id); if (!l || l.kind !== 'service') return;
+    (b.items || []).forEach(it => { const m = d2.items[it.id]; if (m && m.id === r.id) { const z = itemState(b, it, d2); (due[r.id] = due[r.id] || []).push({name: it.name, text: pillText(b, z), s: z.s}); } });
+  });
+  const effects = (b.items || []).map(it => {
+    const a = itemState(b, it), z = itemState(b, it, d2);
+    return {name: it.name, before: pillText(b, a), after: pillText(b, z), s0: a.s, s1: z.s};
+  }).filter(x => x.before !== x.after);
+  const changes = patches.filter(p => !('correction' in p.patch && Object.keys(p.patch).length === 1)).length + (reading ? 1 : 0);
+  return {patches, reading, der: d2, proposed, due, effects, open, changes, cur: d2.cur};
+}
+/* Vorhandener Widerspruch im Verlauf, der sich als Tippfehler berichtigen lässt (für „Wartungsstand prüfen“):
+   der jüngste niedrigere Stand, dessen Berichtigung mindestens einen Punkt mit diesem Zustand auflöst */
+export function fixCandidate(b){
+  const d = S.der[b.id]; if (!d) return null;
+  const chk = (b.items || []).filter(it => itemState(b, it).s === 'chk');
+  if (!chk.length) return null;
+  for (let i = d.ev.length - 1; i >= 0; i--) {
+    const e = d.ev[i];
+    if (e.k !== 'set' || e.legacy || e.prev == null || !(e.tot < e.prev - 0.005)) continue;
+    const plan = fixPlan(b, S.log, S.rides, {id: e.id});
+    if (!plan) continue;
+    const auto = {}; plan.rows.forEach(r => { if (r.kind === 'auto') auto[r.id] = true; });
+    const dec = {}; plan.rows.forEach(r => { if (r.kind === 'manual' || r.kind === 'unclear') dec[r.id] = 'fix'; });
+    const res = fixResult(b, S.log, S.rides, plan, {auto, dec}, {t: 0, op: ''});
+    if (chk.some(it => itemState(b, it, res.der).s !== 'chk')) return plan;
+  }
+  return null;
 }

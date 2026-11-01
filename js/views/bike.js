@@ -4,7 +4,7 @@
 import {esc, str, fmt, eur, uid, v2, validId, safeUrl, turns, isISO, todayISO, fmtDate, canon, pad, subOf} from '../util.js';
 import {S, lsSet, lsJSON, bikeList, curBike, U, bikeName} from '../state.js';
 import {CHECK, GROUNDS, WEATHER, FLUIDS, MONTHS, LIM, MAX_COST, BRANDS, BRAND_LIST, KW, INAMES, TEMPLATES, MODELS, MODEL_TPL, SF,
-  brandOf, colorOf, plateOf, shortName, curOf, itemState, pillText, sortedItems, svcAtOf, valueAt, hasSetOn,
+  brandOf, colorOf, plateOf, shortName, curOf, totOf, offOf, posAt, itemState, pillText, sortedItems, svcAtOf, valueAt, hasSetOn,
   serviceDoc, rideDoc, noteDoc, snapOf, sigOf, localParse, quickKindText, openDefects, DEFECT_PRIOS, canonDoc} from '../domain.js';
 import * as store from '../store.js';
 import {opFor, parkOp, execOp, bumpGen, lowCheck, addUnres, BIKE_FORMS, cleanupFiles, payloadFiles, flow, reconcile} from '../ops.js';
@@ -12,6 +12,7 @@ import {$, $$, toast, errText, arm, VErr, fieldNum, fieldDate, imgTag, hydrate, 
 import {makePhoto, makeBikePhoto, makePdf} from '../images.js';
 import {openCropper} from '../cropper.js';
 import {R} from '../registry.js';
+import {jumpOk, typoPlan, checkPlan, openFix, renderMeter, meterPlaceholder, saveMeter, meterName} from './counter.js';
 
 /* ---------- Speichern mit Meldung ---------- */
 const UNCLEAR_MSG = 'Unklar, ob gespeichert wurde. Versuch es gleich nochmal, dabei entsteht nichts doppelt.';
@@ -79,6 +80,7 @@ export function renderQuick(){
   if (!p || (!p.entries.length && !p.warn)) { out.innerHTML = ''; return; }
   if (!p.entries.length) { out.innerHTML = '<div class="preview"><div class="kind">So habe ich es verstanden</div><p class="warnbox">' + esc(p.warn) + '</p><p class="pend-src">Dein Text: „' + esc(p.text) + '“</p><div class="row"><button class="btn ghost" type="button" id="qDrop">Schließen</button></div></div>'; return; }
   const multi = p.entries.length > 1;
+  let typo = -1;
   const blocks = p.entries.map((x, i) => {
     const b = S.bikes[x.bike]; if (!b) return '';
     const u = U(b), items = b.items || [];
@@ -91,6 +93,8 @@ export function renderQuick(){
     } else if (x.kind === 'reading') {
       const pos = valueAt(b.id, x.date, Date.now());
       rows.push(['Stand', x.at == null ? 'fehlt' : fmt(x.at, 2) + ' ' + u + (pos != null && x.at < pos ? ' (niedriger als berechnet: ' + fmt(pos, 2) + ' ' + u + ', gilt als Korrektur)' : '')]);
+      /* Einzelner, niedrigerer Stand von heute: statt der Korrektur den vorigen Tippfehler berichtigen */
+      if (!multi && !p.tried && x.at != null && x.date === todayISO() && typoPlan(b, x.at)) typo = i;
     } else if (x.kind === 'part') {
       rows.push(['Teil', x.name], ['Änderung', partText(x)]);
     } else if (x.kind === 'ride') {
@@ -112,7 +116,8 @@ export function renderQuick(){
     if (x.cost != null && x.kind !== 'defect' && x.kind !== 'part' && x.kind !== 'reading') rows.push(['Kosten', eur(x.cost)]);
     if (x.note && x.note !== p.text && x.kind !== 'defect') rows.push(['Notiz', x.note]);
     return '<div class="pend"><dl class="kv">' + rows.map(r => '<dt>' + r[0] + '</dt><dd>' + (r[2] ? r[1] : esc(r[1])) + '</dd>').join('') + '</dl>'
-      + '<div class="row"><button class="mini" type="button" data-qedit="' + i + '"' + (p.saving ? ' disabled' : '') + '>Bearbeiten</button>' + (multi ? '<button class="mini" type="button" data-qdrop="' + i + '"' + (p.saving ? ' disabled' : '') + '>Entfernen</button>' : '') + '</div></div>';
+      + '<div class="row"><button class="mini" type="button" data-qedit="' + i + '"' + (p.saving ? ' disabled' : '') + '>Bearbeiten</button>' + (multi ? '<button class="mini" type="button" data-qdrop="' + i + '"' + (p.saving ? ' disabled' : '') + '>Entfernen</button>' : '')
+      + (typo === i ? '<button class="mini" type="button" data-qtypo="' + i + '"' + (p.saving ? ' disabled' : '') + '>Tippfehler berichtigen …</button>' : '') + '</div></div>';
   }).join('');
   out.innerHTML = '<div class="preview"><div class="kind">So habe ich es verstanden</div>'
     + (p.warn ? '<p class="warnbox">' + esc(p.warn) + '</p>' : '')
@@ -125,6 +130,16 @@ async function commitPending(){
   if (p.entries.some(e => e.kind === 'ride' && e.amount == null)) { p.warn = 'Bei der Fahrt fehlt eine gültige Fahrzeit. Tipp auf „Bearbeiten“.'; renderQuick(); return; }
   if (p.entries.some(e => e.kind === 'defect' && !e.title)) { p.warn = 'Dem Mangel fehlt ein Titel. Tipp auf „Bearbeiten“.'; renderQuick(); return; }
   if (p.entries.some(e => e.kind === 'reading' && e.at == null)) { p.warn = 'Beim Stand fehlt eine gültige Zahl. Tipp auf „Bearbeiten“.'; renderQuick(); return; }
+  /* Auffällig hoher Stand? Verglichen mit dem Stand an dieser Stelle, inklusive der Einträge davor in dieser Vorschau */
+  const last = {};
+  for (const x of p.entries) {
+    const b = S.bikes[x.bike]; if (!b) continue;
+    let prev = last[x.bike] && last[x.bike].date <= x.date ? last[x.bike].v : valueAt(b.id, x.date, Date.now());
+    if (x.kind === 'ride') { if (prev != null && x.amount != null && (!last[x.bike] || last[x.bike].date <= x.date)) last[x.bike] = {date: x.date, v: Math.round((prev + x.amount) * 100) / 100}; continue; }
+    if (x.at == null || x.payload || !['reading', 'service', 'note'].includes(x.kind)) continue;
+    if (!(await jumpOk(x, b, x.date, x.at, null, prev))) { p.warn = 'Nichts gespeichert. Zum Ändern des Stands tipp beim Eintrag auf „Bearbeiten“.'; renderQuick(); return; }
+    if (x.kind !== 'note') last[x.bike] = {date: x.date, v: x.at};
+  }
   /* Erfassungszeit in der angezeigten Reihenfolge festlegen, einmal und vor dem ersten Speichern */
   const base = Date.now();
   p.entries.forEach((x, i) => { if (!x.created) x.created = base + i; });
@@ -175,8 +190,7 @@ function editPending(i){
     $('#dTitle').value = x.title || ''; $('#dDesc').value = x.description || ''; $('#dDate').value = x.date; $('#dPrio').value = x.priority || 'mid';
     $('#defectDetails').open = true; setSection('defects', 'defectDetails');
   } else if (x.kind === 'reading') {
-    const f = $('#hoursForm'); f.hidden = false; f.dataset.bike = x.bike; f.dataset.epoch = S.epoch || ''; delete f.dataset.confirm;
-    $('#hoursHint').hidden = true; $('#hoursSave').textContent = 'Speichern';
+    const f = $('#hoursForm'); f.hidden = false; f.dataset.bike = x.bike; f.dataset.epoch = S.epoch || ''; hoursReset();
     $('#hoursInput').value = x.at != null ? v2(x.at) : '';
     setSection('status'); $('#hoursInput').focus();
   } else if (x.kind === 'part') {
@@ -226,13 +240,17 @@ export function closeDraft(k){
   if (k === 'doneForm') { S.doneOpen = null; S.doneDraft = null; }
   else if (k === 'logForm') { $('#logForm').reset(); $('#lDate').value = todayISO(); $('#lKind').value = 'service'; S.logTasks.clear(); $('#logDetails').open = false; }
   else if (k === 'rideForm') { $('#rideForm').reset(); $('#rDate').value = todayISO(); $('#rideDetails').open = false; }
-  else if (k === 'hoursForm') { const hf = $('#hoursForm'); hf.hidden = true; delete hf.dataset.confirm; $('#hoursHint').hidden = true; $('#hoursSave').textContent = 'Speichern'; }
+  else if (k === 'hoursForm') { const hf = $('#hoursForm'); hf.hidden = true; hoursReset(); }
+  else if (k === 'meterForm') { const mf = $('#meterForm'); if (mf) { mf.reset(); $('#mDate').value = todayISO(); meterPlaceholder(curBike()); } }
   else if (k === 'setupForm') { resetSetupForm(); $('#setupDetails').open = false; }
   else if (k === 'partForm') { $('#pName').value = ''; $('#pQty').value = '1'; $('#pMin').value = '1'; partEditMode(null); }
   else if (k === 'addBikeForm') { S.adding = false; dropAddPhoto(); const el = $('#addBike'); if (el) el.innerHTML = ''; }
   else if (k === 'defectForm' || k === 'defDoneForm') { R.closeDefectDraft(k); }
   bumpGen(k);
 }
+
+/* Stand-Formular: Hinweis auf eine Korrektur und „Tippfehler berichtigen“ zurücksetzen */
+function hoursReset(){ const hf = $('#hoursForm'); delete hf.dataset.confirm; $('#hoursHint').hidden = true; $('#hoursTypo').hidden = true; $('#hoursSave').textContent = 'Speichern'; }
 
 /* Teileformular: neues Teil anlegen (Standard) oder einen vorhandenen Posten ändern (aus „Bearbeiten“ im Schnell-Eintrag) */
 function partEditMode(ex, base){
@@ -250,8 +268,12 @@ function renderBanner(){
   const el = $('#banner'), b = curBike(), rows = [];
   if (!el) return;
   if (b) {
-    const due = [], soon = [];
-    (b.items || []).forEach(it => { const st = itemState(b, it); if (st.s === 'bad') due.push(it.name); else if (st.s === 'warn') soon.push(it.name + ' (' + pillText(b, st) + ')'); });
+    const due = [], soon = [], chk = [];
+    (b.items || []).forEach(it => { const st = itemState(b, it); if (st.s === 'bad') due.push(it.name); else if (st.s === 'warn') soon.push(it.name + ' (' + pillText(b, st) + ')'); else if (st.s === 'chk') chk.push(it.name); });
+    /* Widerspruch im Verlauf: lässt er sich als Tippfehler berichtigen, gibt es „Prüfen“ (Vorschau), sonst zum Punkt */
+    if (chk.length) rows.push(checkPlan(b)
+      ? '<div class="banner-row chk"><b>Wartungsstand prüfen</b><span>' + esc(chk.join(', ')) + '</span><button class="mini" type="button" data-chk="' + esc(b.id) + '">Prüfen</button></div>'
+      : '<button class="banner-row warn" type="button" data-goto="status" data-anchor="c-items"><b>Wartungsstand prüfen</b><span>' + esc(chk.join(', ')) + ': Stand der letzten Wartung liegt über dem heutigen</span></button>');
     if (due.length) rows.push('<button class="banner-row" type="button" data-goto="status" data-anchor="c-items"><b>Überfällig</b><span>' + esc(due.join(', ')) + '</span></button>');
     if (soon.length) rows.push('<button class="banner-row warn" type="button" data-goto="status" data-anchor="c-items"><b>Bald fällig</b><span>' + esc(soon.join(', ')) + '</span></button>');
   }
@@ -301,11 +323,14 @@ export function renderStatus(){
   const b = curBike(); if (!b) return;
   const u = U(b), cur = curOf(b);
   $('#statusPhoto').innerHTML = b.photo ? imgTag(b.photo.id, 'Foto von ' + titleOf(b), 'hero-photo') : '';
-  $('#plateLabel').textContent = u === 'km' ? 'Kilometerstand' : 'Betriebsstunden';
+  const off = offOf(b), tot = totOf(b);
+  /* Nach einem Zählerwechsel: Schild = Anzeige des eingebauten Zählers, darunter die Gesamtlaufleistung */
+  $('#plateLabel').textContent = off ? 'Zähleranzeige' : (u === 'km' ? 'Kilometerstand' : 'Betriebsstunden');
   $('#plateNum').textContent = cur == null ? '–' : fmt(cur);
+  const pt = $('#plateTotal'); pt.hidden = !off; pt.textContent = off && tot != null ? 'Gesamtlaufleistung ' + fmt(tot) + ' ' + u : '';
   $('#plateUnit').textContent = u;
   $('#plateBtn').setAttribute('style', plateStyle(b));
-  $('#plateBtn').setAttribute('aria-label', (cur == null ? 'Stand unbekannt' : 'Stand ' + fmt(cur) + ' ' + (u === 'km' ? 'Kilometer' : 'Stunden')) + ', ändern');
+  $('#plateBtn').setAttribute('aria-label', (cur == null ? 'Stand unbekannt' : (off ? 'Zähleranzeige ' : 'Stand ') + fmt(cur) + ' ' + (u === 'km' ? 'Kilometer' : 'Stunden')) + (off && tot != null ? ', Gesamtlaufleistung ' + fmt(tot) : '') + ', ändern');
   const next = sortedItems(b).filter(x => x.st.s !== 'unk')[0];
   const last = S.log.filter(l => l.bike === b.id && l.kind === 'service')[0];
   const lines = [];
@@ -321,7 +346,8 @@ export function renderStatus(){
     if (it.months) parts.push('alle ' + it.months + ' Mon.');
     let sub = parts.join(' / ') || 'kein Intervall';
     const m = st.m;
-    if (m && (m.at != null || m.date)) sub += ' · zuletzt ' + (m.at != null ? 'bei ' + fmt(m.at, 2) + ' ' + u + ' ' : '') + (m.date ? '(' + fmtDate(m.date) + ')' : '') + (m.at == null && it.every ? ', Stand unbekannt' : '');
+    /* Nach einem Zählerwechsel als Gesamtlaufleistung, damit es zur Restlaufzeit passt */
+    if (m && (m.at != null || m.date)) sub += ' · zuletzt ' + (m.at != null ? 'bei ' + fmt(m.at, 2) + ' ' + u + (off ? ' gesamt' : '') + ' ' : '') + (m.date ? '(' + fmtDate(m.date) + ')' : '') + (m.at == null && it.every ? ', Stand unbekannt' : '');
     else sub += ' · noch kein Eintrag';
     const open = S.doneOpen === it.id, d = S.doneDraft || {};
     const so = S.ops.doneForm, saving = !!(so && so.saving && so.item === it.id && so.bike === b.id);
@@ -350,16 +376,21 @@ export function renderStatus(){
 export const prioRank = d => ({high: 0, mid: 1, low: 2})[d.priority] ?? 1;
 export const prioText = p => (DEFECT_PRIOS.find(x => x[0] === p) || [0, 'mittel'])[1];
 
-function runtime(b, at){ const cur = curOf(b); return (at != null && cur != null) ? fmt(Math.max(0, cur - at)) + ' ' + U(b) + ' gelaufen' : ''; }
+/* Gelaufen seit der Montage: Gesamtlaufleistung jetzt minus Gesamtlaufleistung bei der Montage (eingetragen wird die Anzeige) */
+function runtime(b, at, date){
+  const tot = totOf(b); if (at == null || tot == null) return '';
+  const o = date ? posAt(b.id, date, Infinity).off : offOf(b);
+  return fmt(Math.max(0, tot - (at + o))) + ' ' + U(b) + ' gelaufen';
+}
 function mountHTML(b){
   const t = b.tires || {}, c = b.chain || {}, tf = t.front || {}, tr = t.rear || {};
   const ratio = (c.front && c.rear) ? ' · ' + fmt(c.rear / c.front, 2) : '';
   const cell = (lbl, val, run) => '<div class="mount-cell"><span class="lbl">' + lbl + '</span><b>' + (val ? esc(val) : '<span class="hint">nicht eingetragen</span>') + '</b>' + (run ? '<span class="run">' + esc(run) + '</span>' : '') + '</div>';
   return '<div class="mount">'
-    + cell('Reifen vorn', tf.model, runtime(b, tf.at))
-    + cell('Reifen hinten', tr.model, runtime(b, tr.at))
+    + cell('Reifen vorn', tf.model, runtime(b, tf.at, tf.date))
+    + cell('Reifen hinten', tr.model, runtime(b, tr.at, tr.date))
     + cell('Übersetzung', (c.front && c.rear) ? c.front + ' / ' + c.rear + ratio : '', '')
-    + cell('Kette', [c.brand, c.links ? c.links + ' Glieder' : ''].filter(Boolean).join(', '), runtime(b, c.at))
+    + cell('Kette', [c.brand, c.links ? c.links + ' Glieder' : ''].filter(Boolean).join(', '), runtime(b, c.at, c.date))
     + '</div>';
 }
 
@@ -396,23 +427,31 @@ function renderLog(){
   updateLogAtHint();
   renderLogTasks();
   const entries = S.log.filter(l => l.bike === b.id);
-  const work = entries.filter(l => l.kind !== 'reading');
+  const work = entries.filter(l => l.kind !== 'reading' && l.kind !== 'meter');
   const year = todayISO().slice(0, 4);
   const sum = work.reduce((a, l) => a + (l.cost || 0), 0);
   const sumY = work.filter(l => (l.date || '').startsWith(year)).reduce((a, l) => a + (l.cost || 0), 0);
   $('#logStats').innerHTML = '<div class="stat"><b>' + work.length + '</b><span>Einträge</span></div><div class="stat"><b>' + eur(sumY).replace(/,00\s/, ' ') + '</b><span>Kosten ' + year + '</span></div><div class="stat"><b>' + eur(sum).replace(/,00\s/, ' ') + '</b><span>Kosten gesamt</span></div>';
   $('#logCount').textContent = entries.length ? entries.length + ' Einträge' : '';
-  const kinds = {service: 'Wartung', tire: 'Reifen', chain: 'Kette', note: 'Notiz', reading: 'Stand'};
-  const armText = {service: 'Löschen? Fälligkeit wird neu berechnet', reading: 'Löschen? Stand wird neu berechnet'};
+  const kinds = {service: 'Wartung', tire: 'Reifen', chain: 'Kette', note: 'Notiz', reading: 'Stand', meter: 'Zähler ersetzt'};
+  const armText = {service: 'Löschen? Fälligkeit wird neu berechnet', reading: 'Löschen? Stand wird neu berechnet', meter: 'Löschen? Stand wird neu berechnet'};
+  const der = S.der[b.id] || {probe: {}, poff: {}};
+  /* Gesamtlaufleistung dazuschreiben, wenn sie von der damaligen Anzeige abweicht (nach einem Zählerwechsel) */
+  const totNote = id => der.poff[id] && der.probe[id] != null ? 'gesamt ' + fmt(der.probe[id], 2) + ' ' + u : '';
+  const fixNote = l => !l.fix ? '' : l.fix.how === 'tippfehler' ? 'berichtigt, vorher ' + fmt(l.fix.from, 2) + ' ' + u : 'bei einer Berichtigung festgehalten';
   $('#logList').innerHTML = entries.length ? entries.map(l => {
-    if (l.kind === 'reading') {
-      return '<div class="entry reading"><div><div class="entry-date">' + fmtDate(l.date) + '</div><div class="entry-at">' + fmt(l.at, 2) + '<small> ' + u + '</small></div></div>'
-        + '<div class="entry-body"><span class="kind reading">' + (l.correction ? 'Stand korrigiert' : 'Stand abgelesen') + '</span>'
+    if (l.kind === 'reading' || l.kind === 'meter') {
+      const meter = l.kind === 'meter';
+      const label = meter ? meterName(b) + ' ersetzt' : (l.fix && l.fix.how === 'tippfehler' ? 'Stand berichtigt (Tippfehler)' : (l.correction ? 'Stand korrigiert' : 'Stand abgelesen'));
+      const note = meter ? 'Alter Zähler zuletzt ' + (l.at == null ? 'unbekannt' : fmt(l.at, 2) + ' ' + u) + ', neuer Zähler ab ' + fmt(l.meterNew, 2) + ' ' + u + '. Gesamtlaufleistung und Wartungen bleiben erhalten.'
+        : [fixNote(l), totNote(l.id)].filter(Boolean).join(' · ');
+      return '<div class="entry reading"><div><div class="entry-date">' + fmtDate(l.date) + '</div><div class="entry-at">' + fmt(meter ? l.meterNew : l.at, 2) + '<small> ' + u + '</small></div></div>'
+        + '<div class="entry-body"><span class="kind reading">' + label + '</span>' + (note ? '<div class="entry-note">' + esc(note) + '</div>' : '')
         + '<div class="entry-foot"><span></span><button class="mini" type="button" data-del="log/' + esc(l.id) + '" data-arm="' + armText.reading + '">Löschen</button></div></div></div>';
     }
     const title = [].concat(l.taskNames || [], l.extra ? [l.extra] : [], l.title ? [l.title] : []).join(' · ');
     const sa = svcAtOf(l);
-    const atNote = l.kind !== 'service' ? '' : (sa.src === 'auto' ? 'aus Verlauf' : (sa.src === 'unk' ? 'Stand unbekannt' : ''));
+    const atNote = l.kind !== 'service' ? '' : [sa.src === 'auto' ? 'aus Verlauf' : (sa.src === 'unk' ? 'Stand unbekannt' : ''), fixNote(l), totNote(l.id)].filter(Boolean).join(', ');
     const kind = l.repairOf ? 'Reparatur' : (kinds[l.kind] || 'Eintrag');
     return '<div class="entry"><div><div class="entry-date">' + fmtDate(l.date) + '</div><div class="entry-at">' + (sa.v == null ? '' : fmt(sa.v, 2) + '<small> ' + u + '</small>') + '</div>' + (atNote ? '<div class="hint" style="font-size:12px">' + atNote + '</div>' : '') + '</div>'
       + '<div class="entry-body"><span class="kind">' + kind + (l._pending ? ' <span class="hint">wird gespeichert …</span>' : '') + '</span>'
@@ -555,6 +594,7 @@ function renderGarage(){
       + ((b.items || []).map(it => '<dt>' + esc(it.name) + '</dt><dd>' + ([it.every ? fmt(it.every) + ' ' + u : '', it.months ? it.months + ' Mon.' : ''].filter(Boolean).join(' / ') || '–') + '</dd>').join('') || '<dt>–</dt><dd>Noch keine Wartungspunkte</dd>') + '</dl>';
   }
   $$('[data-edit]').forEach(x => { x.textContent = 'Bearbeiten'; x.disabled = !!S.editing[x.dataset.edit]; });
+  renderMeter(b);
 }
 
 function renderManual(){
@@ -644,7 +684,7 @@ function openEdit(key){
     $('#intBody').innerHTML = '<form id="intForm" class="stack" data-bike="' + esc(b.id) + '" novalidate><div class="f"><label for="iUnit">Zählt nach</label><select id="iUnit"><option value="h">Betriebsstunden</option><option value="km">Kilometern</option></select></div>'
       + '<div class="tbl-wrap"><table class="int"><thead><tr><th>Wartungspunkt</th><th>alle ' + u + '</th><th>alle Mon.</th><th>Startwert bei</th><th>Startwert am</th><th><span class="sr">Entfernen</span></th></tr></thead><tbody id="intRows">' + (b.items || []).map(row).join('') + '</tbody></table></div>'
       + '<div class="row"><button class="btn" type="button" id="intAdd">Punkt hinzufügen</button></div>'
-      + '<p class="hint">Den Startwert brauchst du nur, wenn die letzte Arbeit nicht im Logbuch steht. Ein neuerer Logbuch-Eintrag gilt automatisch. Einfacher geht es unter Status über „Erledigt“.</p>'
+      + '<p class="hint">Den Startwert brauchst du nur, wenn die letzte Arbeit nicht im Logbuch steht. Ein neuerer Logbuch-Eintrag gilt automatisch. Einfacher geht es unter Status über „Erledigt“.' + (offOf(b) ? ' Nach einem Zählerwechsel gilt der Startwert als Anzeige des Zählers, der am Startdatum eingebaut war (ohne Datum: des ersten Zählers).' : '') + '</p>'
       + '<div class="row"><button class="btn primary" type="submit">Speichern</button><button class="btn ghost" type="button" data-cancel="int">Abbrechen</button></div></form>';
     $('#iUnit').value = u;
     $('#intAdd').onclick = () => { $('#intRows').insertAdjacentHTML('beforeend', row({})); };
@@ -681,6 +721,11 @@ async function saveTC(b){
   [[fChanged, nf], [rChanged, nr], [cChanged, nc]].forEach(([ch, o]) => { if (ch) { if (!o.date) o.date = today; if (o.at == null && o.date === today) o.at = cur; } });
   const o = opFor('tcForm', b.id, 'bikes', null, canon([nf, nr, nc])); if (o.saving) return false;
   o.noTrack = true;
+  /* Auffällig hoher Montage-Stand? Nur geänderte Werte, verglichen mit dem Stand am Montagedatum */
+  if (!o.payload) for (const [ch, x, prevAt, el] of [[fChanged, nf, tf.at, 'tfA'], [rChanged, nr, tr.at, 'trA'], [cChanged, nc, c.at, 'cA']]) {
+    if (!ch || x.at == null || sm(x.at, prevAt)) continue;
+    if (!(await jumpOk(o, b, x.date || today, x.at, el, posAt(b.id, x.date || today, Infinity).disp))) return false;
+  }
   if (!o.payload) {
     const now = o.created, base = {bike: b.id, tasks: [], taskNames: [], extra: '', cost: null, note: '', atAuto: false};
     const items = [{coll: 'bikes', id: b.id, patch: {tires: {front: nf, rear: nr}, chain: nc}}];
@@ -718,6 +763,14 @@ async function saveInt(b){
       lastDate: fieldDate(el('lastDate'), lbl + ', Startdatum'),
       kw: prev.kw || [name.toLowerCase()]};
   }).filter(Boolean);
+  /* Geänderter Startwert deutlich über dem Stand am Startdatum (ohne Datum: heute)? */
+  for (const it of items) {
+    const prev = old.find(x => x.id === it.id);
+    if (it.lastAt == null || (prev && prev.lastAt === it.lastAt)) continue;
+    const el = $$('#intRows tr').find(tr => tr.dataset.id === it.id);
+    const cmp = it.lastDate ? posAt(b.id, it.lastDate, Infinity).disp : curOf(b);
+    if (!(await jumpOk(null, b, it.lastDate || todayISO(), it.lastAt, el ? $('[data-k="lastAt"]', el) : null, cmp))) return false;
+  }
   if (await bikeUpdate(b.id, {items, unit})) { toast('Gespeichert.'); return true; }
   return false;
 }
@@ -790,17 +843,17 @@ export function setSection(v, anchor){
 /* Alle Formulare, die zu einem Motorrad gehören, schließen und an das neue Motorrad binden */
 export function resetBikeForms(){
   const id = S.bike;
-  const hf = $('#hoursForm'); hf.hidden = true; delete hf.dataset.confirm; $('#hoursHint').hidden = true; $('#hoursSave').textContent = 'Speichern';
+  const hf = $('#hoursForm'); hf.hidden = true; hoursReset();
   S.doneOpen = null; S.doneDraft = null;
   /* Offene Vorgänge gehören zum bisherigen Motorrad: ungeklärte werden getrennt weiter abgeglichen,
      laufende Speicherungen beenden sich selbst. Neue Generation: späte Abschlüsse lassen die neuen Entwürfe in Ruhe. */
   BIKE_FORMS.forEach(k => { parkOp(k); bumpGen(k); });
   /* Formulare gehören zu Motorrad UND Bestand (Kennung): nach dem Einspielen derselben Garage sind sie neu */
-  ['logForm', 'rideForm', 'setupForm', 'defectForm'].forEach(fid => { const f = $('#' + fid); if (!f) return; f.reset(); f.dataset.bike = id; f.dataset.epoch = S.epoch || ''; $$('[aria-invalid]', f).forEach(x => x.removeAttribute('aria-invalid')); });
+  ['logForm', 'rideForm', 'setupForm', 'defectForm', 'meterForm'].forEach(fid => { const f = $('#' + fid); if (!f) return; f.reset(); f.dataset.bike = id; f.dataset.epoch = S.epoch || ''; $$('[aria-invalid]', f).forEach(x => x.removeAttribute('aria-invalid')); });
   $('#rInWrap').hidden = true;
   hf.dataset.bike = id; hf.dataset.epoch = S.epoch || '';
   $('#logDetails').open = false; $('#rideDetails').open = false; $('#setupDetails').open = false;
-  $('#lDate').value = todayISO(); $('#rDate').value = todayISO();
+  $('#lDate').value = todayISO(); $('#rDate').value = todayISO(); $('#mDate').value = todayISO();
   S.logTasks.clear(); S.editing = {}; S.oemDraft = null; S.editSetup = null;
   $('#setupFormTitle').textContent = 'Setup speichern'; $('#sSave').textContent = 'Setup speichern'; $('#sCancel').hidden = true;
   R.resetDefectForms();
@@ -907,11 +960,25 @@ export async function onClick(t){
   if (t.dataset.task) { const id = t.dataset.task; S.logTasks.has(id) ? S.logTasks.delete(id) : S.logTasks.add(id); t.setAttribute('aria-pressed', S.logTasks.has(id)); return true; }
   if (t.id === 'plateBtn') {
     const b = curBike(); if (!b) return true;
-    const f = $('#hoursForm'); f.hidden = false; f.dataset.bike = b.id; f.dataset.epoch = S.epoch || ''; delete f.dataset.confirm;
-    $('#hoursHint').hidden = true; $('#hoursSave').textContent = 'Speichern';
+    const f = $('#hoursForm'); f.hidden = false; f.dataset.bike = b.id; f.dataset.epoch = S.epoch || ''; hoursReset();
     const cur = curOf(b); $('#hoursInput').value = cur != null ? v2(cur) : ''; $('#hoursInput').focus(); return true;
   }
   if (t.id === 'hoursCancel') { if (S.ops.hoursForm && S.ops.hoursForm.saving) return true; parkOp('hoursForm'); closeDraft('hoursForm'); return true; }
+  if (t.id === 'hoursTypo') {
+    /* Statt einer Korrektur die falsche Ablesung selbst berichtigen (Vorschau, nichts wird vorher gespeichert) */
+    const f = $('#hoursForm'), b = S.bikes[f.dataset.bike];
+    if (!b || b.id !== S.bike || (S.ops.hoursForm && S.ops.hoursForm.saving)) return true;
+    const plan = typoPlan(b, Number(f.dataset.confirm));
+    if (!openFix(plan, {onDone: () => { parkOp('hoursForm'); closeDraft('hoursForm'); }})) { t.hidden = true; toast('Dafür gibt es keine eindeutig falsche Ablesung. Speicher den Stand als Korrektur.'); }
+    return true;
+  }
+  if (t.dataset.chk) { const b = S.bikes[t.dataset.chk]; if (!b || !openFix(checkPlan(b), {})) toast('Hier lässt sich nichts automatisch berichtigen. Prüf den Wartungspunkt und den Stand.'); return true; }
+  if (t.dataset.qtypo != null) {
+    const p = S.pending; if (!p || p.saving) return true;
+    const x = p.entries[+t.dataset.qtypo], b = x && S.bikes[x.bike]; if (!b) return true;
+    if (!openFix(typoPlan(b, x.at), {onDone: () => { if (S.pending === p) { p.entries = p.entries.filter(e => e !== x); if (!p.entries.length) { S.pending = null; $('#quickText').value = ''; } } renderQuick(); }})) toast('Dafür gibt es keine eindeutig falsche Ablesung.');
+    return true;
+  }
   if (t.id === 'qCommit') { await commitPending(); return true; }
   if (t.dataset.qedit != null) { editPending(+t.dataset.qedit); return true; }
   if (t.id === 'qSwap') { if (S.pending && !S.pending.saving && !S.pending.tried && S.pending.entries.length === 2) { S.pending.entries.reverse(); S.pending.entries.forEach(x => { x.created = 0; }); renderQuick(); } return true; }
@@ -991,7 +1058,7 @@ export function onInput(t){
     if (tp && TEMPLATES[tp]) { $('#abTpl').value = tp; $('#abUnit').value = TEMPLATES[tp].unit; }
     return true;
   }
-  if (t.id === 'hoursInput') { const f = $('#hoursForm'); delete f.dataset.confirm; $('#hoursHint').hidden = true; $('#hoursSave').textContent = 'Speichern'; return true; }
+  if (t.id === 'hoursInput') { hoursReset(); return true; }
   if (S.doneDraft && t.closest && t.closest('#doneForm')) {
     if (t.id === 'dfAt') { S.doneDraft.atStr = t.value; if (S.ops.doneForm) delete S.ops.doneForm.confirmLow; }
     if (t.id === 'dfCost') S.doneDraft.costStr = t.value;
@@ -1015,6 +1082,7 @@ export function onChange(t){
     return true;
   }
   if (t.id === 'lDate') { updateLogAtHint(); return true; }
+  if (t.id === 'mDate') { meterPlaceholder(curBike()); return true; }
   if (t.id === 'rDate') { updateRideIn(); return true; }
   if (t.id === 'abBrand') {
     const br = BRANDS.find(x => x.n === t.value); if (br) $('#abColor').value = br.c;
@@ -1081,7 +1149,7 @@ export async function onSubmit(f, busy){
     if (r === 'ok') { if ((S.gen.partForm || 0) === g) closeDraft('partForm'); toast('Teil hinzugefügt.'); }
     return true;
   }
-  const own = ['hoursForm', 'doneForm', 'logForm', 'rideForm', 'setupForm', 'bikeForm', 'tcForm', 'oilForm', 'intForm', 'oemForm'];
+  const own = ['hoursForm', 'doneForm', 'logForm', 'rideForm', 'setupForm', 'bikeForm', 'tcForm', 'oilForm', 'intForm', 'oemForm', 'meterForm'];
   if (!own.includes(f.id)) return false;
   const b = formBike(f); if (!b) return true;
   const lim = LIM[U(b)];
@@ -1091,14 +1159,19 @@ export async function onSubmit(f, busy){
     const cur = curOf(b), corr = cur != null && v < cur;
     if (corr && f.dataset.confirm !== String(v)) {
       f.dataset.confirm = String(v);
-      const h = $('#hoursHint'); h.hidden = false;
-      h.textContent = 'Das ist weniger als der aktuelle Stand (' + fmt(cur, 2) + ' ' + U(b) + '). Das ist nur zum Korrigieren eines Tippfehlers gedacht. Zum Bestätigen auf „Korrektur speichern“ tippen.';
+      /* War der bisherige Stand ein Tippfehler, lässt er sich direkt berichtigen (statt eine Korrektur anzulegen) */
+      const plan = typoPlan(b, v), h = $('#hoursHint'); h.hidden = false;
+      h.textContent = 'Das ist weniger als der aktuelle Stand (' + fmt(cur, 2) + ' ' + U(b) + ').' + (plan
+        ? ' Hast du dich vorher vertippt (' + fmt(plan.subject.old, 2) + ' ' + U(b) + ' am ' + fmtDate(plan.subject.date) + ')? Dann tipp auf „Tippfehler berichtigen“. Sonst zum Bestätigen auf „Korrektur speichern“ tippen.'
+        : ' Das ist nur zum Korrigieren eines Tippfehlers gedacht. Zum Bestätigen auf „Korrektur speichern“ tippen.');
+      $('#hoursTypo').hidden = !plan;
       $('#hoursSave').textContent = 'Korrektur speichern';
       return true;
     }
     /* Eine bestätigte Ablesung wird immer gespeichert, auch wenn sie dem berechneten Stand entspricht.
        Identität nur aus der Eingabe; ob es eine Korrektur ist, gehört zum ersten Versuch (eingefrorene Nutzdaten) */
     const o = opFor('hoursForm', b.id, 'log', null, String(v)); if (o.saving) return true;
+    if (!o.payload && !(await jumpOk(o, b, todayISO(), v, 'hoursInput', cur))) return true;
     const g = S.gen.hoursForm || 0;
     if (!o.payload) { o.payload = canonDoc('log', {bike: b.id, kind: 'reading', date: todayISO(), at: v, atAuto: false, correction: corr, tasks: [], taskNames: [], extra: '', cost: null, note: '', created: o.created}); o.label = 'Ablesung ' + fmt(v, 2) + ' ' + U(b); }
     busy(true);
@@ -1114,6 +1187,7 @@ export async function onSubmit(f, busy){
     const cost = fieldNum('dfCost', 'Kosten', {min: 0, max: MAX_COST});
     const o = opFor('doneForm', b.id, 'log', item, [date, at, cost].join('|')); if (o.saving) return true;
     if (!o.payload && !lowCheck(o, b, date, at)) return true;
+    if (!o.payload && !(await jumpOk(o, b, date, at, 'dfAt'))) return true;
     const g = S.gen.doneForm || 0;
     if (!o.payload) { o.payload = serviceDoc(b, {date, at, tasks: [item], cost, created: o.created}); o.label = 'Wartung ' + it.name; }
     const r = await execOp('doneForm', o, () => store.sSetR('log', o.op, o.payload, null, {epoch: o.epoch}));
@@ -1135,6 +1209,7 @@ export async function onSubmit(f, busy){
     const sig = [kind, date, at, cost, extra, note, tasks.join(','), file ? file.name + ':' + file.size + ':' + file.lastModified : ''].join('|');
     const o = opFor('logForm', b.id, 'log', null, sig); if (o.saving) return true;
     if (!o.payload && kind === 'service' && !lowCheck(o, b, date, at)) return true;
+    if (!o.payload && !(await jumpOk(o, b, date, at, 'lAt'))) return true;
     const g = S.gen.logForm || 0;
     const base = {date, at, tasks, extra, cost, note, created: o.created};
     busy(true);
@@ -1188,6 +1263,7 @@ export async function onSubmit(f, busy){
   if (f.id === 'tcForm') { busy(true); if (await saveTC(b)) closeEdit('tc'); return true; }
   if (f.id === 'oilForm') { busy(true); if (await saveOil(b)) closeEdit('oil'); return true; }
   if (f.id === 'intForm') { busy(true); if (await saveInt(b)) closeEdit('int'); return true; }
+  if (f.id === 'meterForm') { await saveMeter(b, busy); return true; }
   if (f.id === 'oemForm') { busy(true); if (S.oemDraft && S.oemDraft.bike !== b.id) { closeEdit('oem'); return true; } if (await saveOem(b)) closeEdit('oem'); return true; }
   return false;
 }
@@ -1197,5 +1273,5 @@ export function initBikeForms(){
   $('#rGround').innerHTML = '<option value="">–</option>' + GROUNDS.map(g => '<option>' + g + '</option>').join('');
   $('#rWeather').innerHTML = '<option value="">–</option>' + WEATHER.map(g => '<option>' + g + '</option>').join('');
   $('#rFeel').innerHTML = [1, 2, 3, 4, 5].map(i => '<label><input type="radio" name="feel" value="' + i + '"><span>' + i + '</span><span class="sr"> von 5</span></label>').join('');
-  $('#lDate').max = todayISO(); $('#rDate').max = todayISO();
+  $('#lDate').max = todayISO(); $('#rDate').max = todayISO(); $('#mDate').max = todayISO(); $('#mDate').value = todayISO();
 }

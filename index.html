@@ -20,8 +20,8 @@
 <a class="skip" href="#main" data-skip="1">Zum Inhalt springen</a>
 <header class="appbar">
   <div class="appbar-in">
-    <button class="back" id="backBtn" type="button" aria-label="Zurück" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><span class="back-l" hidden>Garage</span></button>
-    <a class="brandmark" id="homeLink" href="#/"><img src="icons/emblem.svg" alt="" width="34" height="34"><span>Racebook</span></a>
+    <button class="back" id="backBtn" type="button" aria-label="Zurück" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <a class="brandmark" id="homeLink" href="#/"><img src="icons/emblem-light.svg" alt="" width="34" height="34"><span>Racebook</span></a>
     <div class="bar-title" id="barTitle" hidden></div>
     <button class="bchip" id="backupChip" type="button" hidden></button>
   </div>
@@ -31,13 +31,14 @@
   <div id="sysMsg" class="sysmsg" role="status" hidden></div>
 
   <!-- ÜBERSICHT -->
-  <section id="v-home" class="view" aria-label="Garage">
-    <h1 class="sr">Racebook, Garage: alle Motorräder</h1>
+  <section id="v-home" class="view" aria-labelledby="homeTitle">
+    <h1 class="page-h" id="homeTitle"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5L12 4l9 6.5"/><path d="M5 9.2V20h14V9.2"/><path d="M8 20v-7.5h8V20"/><path d="M8 15h8M8 17.5h8"/></svg>Meine Garage</h1>
     <div id="homeBody" class="stack-l"><p class="hint thinking">Garage wird geladen …</p></div>
   </section>
 
   <!-- MOTORRAD -->
   <section id="v-bike" class="view" hidden aria-labelledby="barTitle">
+    <nav class="garage-nav-wrap" aria-label="Zurück zur Übersicht"><button class="garage-nav" id="garageBtn" type="button"><svg class="ic chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5L12 4l9 6.5"/><path d="M5 9.2V20h14V9.2"/><path d="M8 20v-7.5h8V20"/><path d="M8 15h8M8 17.5h8"/></svg><span>Meine Garage</span></button></nav>
     <div id="banner" class="banner" hidden></div>
 
     <section id="v-status" class="sub">
@@ -48,6 +49,7 @@
           <div>
             <div class="lbl" id="plateLabel">Betriebsstunden</div>
             <button class="plate" id="plateBtn" type="button"><span id="plateNum">–</span><small id="plateUnit">h</small></button>
+            <div class="plate-total" id="plateTotal" hidden></div>
           </div>
           <div class="hero-meta" id="heroMeta"></div>
         </div>
@@ -57,6 +59,7 @@
           <button class="btn primary" type="submit" id="hoursSave">Speichern</button>
           <button class="btn ghost" type="button" id="hoursCancel">Abbrechen</button>
           <p class="warnbox" id="hoursHint" style="flex-basis:100%" hidden></p>
+          <button class="btn" type="button" id="hoursTypo" hidden>Tippfehler berichtigen …</button>
         </form>
       </div>
 
@@ -256,6 +259,20 @@
         <div class="card-h"><h2>Wartungsintervalle</h2><button class="link" type="button" data-edit="int">Bearbeiten</button></div>
         <div id="intBody"></div>
       </div>
+      <details class="card form-card meter-card" id="g-meter">
+        <summary><h2 id="meterTitle">Stundenzähler</h2><span class="tag" id="meterTag"></span></summary>
+        <div class="stack" style="margin-top:10px">
+          <div id="meterInfo"></div>
+          <h3 id="meterFormTitle">Stundenzähler ersetzt</h3>
+          <form id="meterForm" class="grid" novalidate>
+            <div class="f full"><label for="mDate">Ersetzt am</label><input type="date" id="mDate"></div>
+            <div class="f"><label for="mOld" id="mOldLbl">Alter Zähler zuletzt (h)</label><input id="mOld" inputmode="decimal" autocomplete="off"></div>
+            <div class="f"><label for="mNew" id="mNewLbl">Neuer Zähler zeigt (h)</label><input id="mNew" inputmode="decimal" autocomplete="off" value="0"></div>
+            <p class="hint full">Nur ausfüllen, wenn der Zähler wirklich ausgetauscht wurde. Weißt du den letzten Stand des alten Zählers nicht, lass das Feld leer, dann gilt der berechnete. Gesamtlaufleistung und bisherige Wartungen bleiben erhalten.</p>
+            <div class="f full"><button class="btn primary" type="submit">Zählerwechsel speichern</button></div>
+          </form>
+        </div>
+      </details>
     </section>
 
     <!-- HANDBUCH -->
@@ -283,10 +300,13 @@
   <section id="v-help" class="view" hidden aria-label="Hilfe">
     <div class="card help">
       <h2>So funktioniert Racebook</h2>
-      <p><b>Übersicht:</b> Jede Karte zeigt Stand, nächste Wartung und offene Mängel eines Motorrads. Tipp auf die Karte, um es zu öffnen.</p>
+      <p><b>Meine Garage:</b> Die Startseite zeigt alle Motorräder als Karten mit Stand, nächster Wartung und offenen Mängeln. Tipp auf eine Karte, um das Motorrad zu öffnen. Zurück zur Übersicht kommst du über den Knopf „Meine Garage“ oben auf der Motorrad-Seite.</p>
       <p><b>Stand eintragen:</b> Tipp unter Status auf das Nummernschild.</p>
       <p><b>Wartung abhaken:</b> Tipp bei einem Wartungspunkt auf „Erledigt“. Datum und Stand kannst du anpassen, auch für Arbeiten, die schon länger her sind. Ohne Stand von damals zählt nur die Frist in Monaten.</p>
       <p><b>Stand:</b> Ein abgelesener Stand gilt immer, auch wenn er schon mit dem berechneten übereinstimmt. Fahrten werden nach ihrem Datum einsortiert: Eine nachgetragene Fahrt von gestern steckt also schon in einem heute abgelesenen Stand. Bei einer Fahrt vom selben Tag kannst du ankreuzen, ob sie schon im abgelesenen Stand enthalten ist.</p>
+      <p><b>Vertippt?</b> Liegt ein neuer Stand mehr als 20 h bzw. 2.000 km über dem bisherigen, fragt Racebook nach („Eingabe korrigieren“ oder „Stimmt so“). Ist ein neuer Stand niedriger, kannst du mit „Tippfehler berichtigen …“ die falsche Ablesung selbst richtigstellen. Vorher zeigt Racebook alle betroffenen Einträge und was sich bei den Fälligkeiten ändert. Von dir eingetippte Werte ändert es nur, wenn du „berichtigen“ wählst.</p>
+      <p><b>Wartungsstand prüfen:</b> Steht die letzte Wartung bei mehr als dem heutigen Stand, zeigt Racebook keine Restzeit, sondern „Wartungsstand prüfen“. Oben über „Prüfen“ lässt sich das meist direkt berichtigen.</p>
+      <p><b>Neuer Zähler:</b> Wurde der Stundenzähler (Kilometerzähler) getauscht, trag das unter Technik → Stundenzähler ein. Danach zeigt das Schild, was der neue Zähler anzeigt, darunter die Gesamtlaufleistung. Fälligkeiten rechnen mit der Gesamtlaufleistung.</p>
       <p><b>Wartung ohne Stand:</b> Lässt du den Stand leer, ergibt er sich aus dem Verlauf und passt sich an, wenn du zum Beispiel eine frühere Fahrt löschst.</p>
       <p><b>Stand unbekannt:</b> Fehlt für einen Wartungspunkt der Stand oder das Datum der letzten Arbeit, zeigt Racebook „Stand unbekannt“ statt einer Restzeit. Trag die letzte Arbeit über „Erledigt“ ein.</p>
       <p><b>Löschen:</b> Wenn du eine Wartung oder Fahrt löschst, rechnet die App Fälligkeit und Stand neu, als hätte es sie nie gegeben. Ein später abgelesener Stand bleibt dabei gültig.</p>
@@ -323,6 +343,20 @@
   <h2 id="pickTitle">Für welches Motorrad?</h2>
   <div id="pickList" class="stack"></div>
   <div class="row"><button class="btn ghost" type="button" id="pickCancel">Abbrechen</button></div>
+</dialog>
+
+<dialog id="jumpDlg" class="sheet" aria-labelledby="jumpTitle" aria-describedby="jumpText">
+  <h2 id="jumpTitle">Stand prüfen</h2>
+  <p id="jumpText"></p>
+  <div class="row"><button class="btn primary" type="button" id="jumpFix">Eingabe korrigieren</button><button class="btn" type="button" id="jumpOk">Stimmt so</button></div>
+</dialog>
+
+<dialog id="fixDlg" class="sheet fix-sheet" aria-labelledby="fixTitle">
+  <h2 id="fixTitle" tabindex="-1">Tippfehler berichtigen</h2>
+  <div id="fixBody" class="fix-body"></div>
+  <p class="hint" id="fixNeed" hidden></p>
+  <p class="warnbox" id="fixMsg" role="alert" hidden></p>
+  <div class="row"><button class="btn primary" type="button" id="fixApply">Änderungen übernehmen</button><button class="btn ghost" type="button" id="fixCancel">Abbrechen</button></div>
 </dialog>
 
 <noscript><p class="noscript">Racebook braucht JavaScript.</p></noscript>

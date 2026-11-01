@@ -82,7 +82,7 @@ export function orphanList(){
   return out;
 }
 function orphanText(c, d){
-  if (c === 'log') return (d.kind === 'reading' ? 'Stand' : d.kind === 'note' ? 'Notiz' : 'Wartung') + ' vom ' + fmtDate(d.date) + (d.at != null ? ', Stand ' + fmt(d.at, 2) : '') + (d.taskNames && d.taskNames.length ? ', ' + d.taskNames.join(', ') : '') + (d.extra ? ', ' + d.extra : '') + (d.title ? ', ' + d.title : '');
+  if (c === 'log') return (d.kind === 'reading' ? 'Stand' : d.kind === 'meter' ? 'Zählerwechsel' : d.kind === 'note' ? 'Notiz' : 'Wartung') + ' vom ' + fmtDate(d.date) + (d.at != null ? ', Stand ' + fmt(d.at, 2) : '') + (d.taskNames && d.taskNames.length ? ', ' + d.taskNames.join(', ') : '') + (d.extra ? ', ' + d.extra : '') + (d.title ? ', ' + d.title : '');
   if (c === 'rides') return 'Fahrt vom ' + fmtDate(d.date) + (d.amount != null ? ', Dauer bzw. Strecke ' + fmt(d.amount, 2) + ' (Einheit des früheren Motorrads)' : '') + (d.track ? ', ' + d.track : '') + (d.note ? ', ' + d.note : '');
   if (c === 'setups') return 'Setup ' + (d.track || '');
   if (c === 'defects') return 'Mangel „' + d.title + '“ vom ' + fmtDate(d.date);

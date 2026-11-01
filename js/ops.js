@@ -23,7 +23,7 @@ import {refsOf} from './backup.js';
 
 export const hooks = {closeDraft: () => {}, renderSys: () => {}, renderStatus: () => {}, reconcilePending: () => {}};
 
-export const BIKE_FORMS = ['hoursForm', 'doneForm', 'logForm', 'rideForm', 'setupForm', 'defectForm', 'defDoneForm'];
+export const BIKE_FORMS = ['hoursForm', 'doneForm', 'logForm', 'rideForm', 'setupForm', 'defectForm', 'defDoneForm', 'meterForm'];
 export const bumpGen = k => { S.gen[k] = (S.gen[k] || 0) + 1; };
 export function opFor(k, bike, coll, item, sig){
   let o = S.ops[k];

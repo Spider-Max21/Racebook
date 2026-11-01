@@ -13,6 +13,7 @@ import * as bike from './views/bike.js';
 import * as defects from './views/defects.js';
 import * as home from './views/home.js';
 import * as data from './views/data.js';
+import * as counter from './views/counter.js';
 
 /* ---------- Darstellung ---------- */
 function applyTheme(){
@@ -64,11 +65,10 @@ try { if (document.fonts) { document.fonts.ready.then(fitSoon); document.fonts.a
 function renderChrome(){
   const r = R.route, p = S.mode === 'error' ? 'error' : r.page;
   const b = curBike();
-  $('#backBtn').hidden = p === 'home' || p === 'error';
-  /* Auf der Motorrad-Seite heißt der Knopf „Garage“ und führt zur Übersicht aller Motorräder */
-  const toG = p === 'bike', back = $('#backBtn');
-  back.classList.toggle('labeled', toG); $('.back-l', back).hidden = !toG;
-  back.setAttribute('aria-label', toG ? 'Garage: alle Motorräder' : 'Zurück');
+  /* Zurück-Pfeil nur auf Daten, Hilfe und „Motorrad hinzufügen“. Auf der Motorrad-Seite führt stattdessen der
+     Knopf „Meine Garage“ über dem Inhalt zur Übersicht aller Motorräder (ab 1.1.0). */
+  $('#backBtn').hidden = p === 'home' || p === 'error' || p === 'bike';
+  $('#backBtn').setAttribute('aria-label', 'Zurück');
   $('#homeLink').hidden = p !== 'home' && p !== 'error';
   const title = $('#barTitle');
   const t = p === 'bike' && b ? bike.titleOf(b) : p === 'data' ? 'Daten & Sicherung' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
@@ -135,7 +135,7 @@ function openDraftCount(){
   if (!$('#hoursForm').hidden) n++;
   if (S.doneOpen) n++;
   if (open('logDetails') || open('rideDetails') || open('setupDetails') || open('defectDetails')) n++;
-  if (S.defEdit || S.defDone || S.pending || S.adding || S.addPhoto) n++;
+  if (S.defEdit || S.defDone || S.pending || S.adding || S.addPhoto || counter.fixOpen()) n++;
   if (Object.values(S.editing || {}).some(Boolean)) n++;
   if ($('#pName') && $('#pName').value) n++;
   return n;
@@ -145,6 +145,7 @@ function onDatasetChange(phase){
   if (phase === 'vorher') {
     resetInfo = {drafts: openDraftCount(), local: !!S.replacing};
     S.ops = {};
+    counter.closeFix();
     if (S.pending) S.pending = null;
     const q = $('#quickText'); if (q) q.value = '';
     bike.renderQuick();
@@ -178,6 +179,7 @@ function renderAll(){
   if (p === 'bike' && curBike()) { bike.renderBike(); defects.renderDefects(); }
   if (p === 'data') data.renderData();
   if (p === 'add') bike.renderAddBike();
+  counter.onRender();
 }
 
 /* ---------- Navigation (Zurück-Geste von Android führt zur Übersicht) ---------- */
@@ -272,6 +274,7 @@ document.addEventListener('click', async e => {
   if (t.dataset.nav) { e.preventDefault(); navigate({page: t.dataset.nav}); return; }
   if (t.disabled) return;
   if (t.id === 'backBtn') { if (R.route.page === 'bike') toGarage(); else goBack(); return; }
+  if (t.id === 'garageBtn') { toGarage(); return; }
   if (t.id === 'backupChip') { navigate({page: 'data'}); return; }
   if (t.id === 'reloadBtn') { location.reload(); return; }
   if (t.id === 'replacedOk') { S.replaced = null; renderSys(); return; }
@@ -337,7 +340,7 @@ function initStatic(){
   $('#tabsIn').innerHTML = SECTIONS.map(([v, l, full, short]) => '<button class="tab" type="button" data-v="' + v + '" aria-current="false"' + (full || short ? ' aria-label="' + (full || l) + '"' : '') + '>' + icon(v)
     + (short ? '<span class="l-long">' + l + '</span><span class="l-short" aria-hidden="true">' + short + '</span>' : '<span>' + l + '</span>') + '</button>').join('');
   $$('form').forEach(f => f.setAttribute('novalidate', ''));
-  bike.initBikeForms();
+  bike.initBikeForms(); counter.initCounter();
   bike.resetBikeForms();
 }
 async function boot(){

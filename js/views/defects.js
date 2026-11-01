@@ -14,6 +14,7 @@ import {opFor, execOp, lowCheck, cleanupFiles, payloadFiles, parkOp, bumpGen} fr
 import {$, $$, toast, arm, VErr, fieldNum, fieldDate, imgTag, hydrate} from '../ui.js';
 import {makePhoto} from '../images.js';
 import {R} from '../registry.js';
+import {jumpOk} from './counter.js';
 import {formBike, sUpdate, sDel, prioRank, prioText, setSection} from './bike.js';
 
 const MAX_PHOTOS = 6;
@@ -170,6 +171,7 @@ async function saveDefectDone(f, busy){
   const note = withLog ? str($('#ddNote').value).slice(0, 500) : '';
   const o = opFor('defDoneForm', b.id, withLog ? 'log' : 'defects', d.id, [date, withLog, at, cost, note].join('|')); if (o.saving) return;
   if (!o.payload && withLog && !lowCheck(o, b, date, at)) return;
+  if (!o.payload && withLog && !(await jumpOk(o, b, date, at, 'ddAt'))) return;
   const g = S.gen.defDoneForm || 0;
   if (!o.payload) {
     const n = (d.repairs || 0) + 1;

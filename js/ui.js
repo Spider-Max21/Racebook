@@ -23,6 +23,7 @@ export function errText(e){
   if (c === 'stale') return 'Die Daten wurden inzwischen ersetzt (Sicherung eingespielt oder Sicherheitskopie zurückgeholt), auch in einem anderen Fenster. Dieser Vorgang gehörte zum vorherigen Stand.';
   if (c === 'orphan') return 'Das Motorrad gibt es nicht mehr, es wurde wohl in einem anderen Fenster entfernt.';
   if (c === 'timeout') return 'Der Speicher antwortet gerade nicht.';
+  if (c === 'changed') return 'Die Daten des Motorrads haben sich inzwischen geändert, zum Beispiel in einem anderen Fenster.';
   if (c === 'decode') return 'Das Bild konnte nicht gelesen werden.';
   if (c === 'too_big') return 'Die Datei ist zu groß.';
   if (c === 'not_pdf') return 'Die Datei ist keine PDF-Datei.';
@@ -110,6 +111,7 @@ const P = {
   warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/>',
   bad: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6"/><path d="M12 16.5h.01"/>',
   unk: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7"/><path d="M12 17h.01"/>',
+  chk: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/><path d="M10.5 7.5v3.5"/><path d="M10.5 13.5h.01"/>',
   none: '<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>',
   bike: '<circle cx="5.5" cy="16.5" r="3.5"/><circle cx="18.5" cy="16.5" r="3.5"/><path d="M5.5 16.5l4-7h5l4 7M9.5 9.5L8 6H5.5M14.5 9.5l1.5-3.5h2.5"/>',
   share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',

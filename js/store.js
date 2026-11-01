@@ -12,7 +12,7 @@
    wird alles neu gelesen und die Oberfläche benachrichtigt (onEpochChange).
    Für automatisierte Tests kann window.__T Fehler einspeisen (siehe tests/inject.js). */
 import * as DB from './db.js';
-import {clone, same, subOf, validId} from './util.js';
+import {clone, same, subOf, validId, bikeFp} from './util.js';
 import {S, COLLS} from './state.js';
 
 const T = () => (typeof window !== 'undefined' && window.__T) || null;
@@ -125,7 +125,7 @@ async function run(ops, after, opts){
   if (r.ok) after(false, r.res);
   /* Abgewiesen, weil der Bestand ersetzt wurde oder das Motorrad fehlt: neu lesen (auch falls die
      Nachricht aus dem anderen Fenster nicht angekommen ist) */
-  if (r.err && (r.err.code === 'stale' || r.err.code === 'orphan')) reloadAll().catch(() => {});
+  if (r.err && (r.err.code === 'stale' || r.err.code === 'orphan' || r.err.code === 'changed')) reloadAll().catch(() => {});
   return r;
 }
 
@@ -253,9 +253,18 @@ async function delR(coll, id, ep){
    opts.epoch: Bestandskennung des Vorgangs; opts.out: erhält removed (tatsächlich entfernte Einträge) */
 export function commitR(items, files, label, opts){
   const ep = epochArg(opts);
-  return counted(() => commitRun(items, files, label, ep, opts && opts.out));
+  return counted(() => commitRun(items, files, label, ep, opts && opts.out, opts && opts.expect));
 }
-async function commitRun(items, files, label, ep, out){
+/* Fingerabdruck des gespeicherten Stands eines Motorrads (wie der Speicher ihn in der Transaktion berechnet) */
+export function bikeFpOf(bid){
+  const withId = (c, id) => Object.assign(clone(L[c][id]), {id});
+  return bikeFp(L.bikes[bid] ? withId('bikes', bid) : null,
+    Object.keys(L.log).filter(id => L.log[id].bike === bid).map(id => withId('log', id)),
+    Object.keys(L.rides).filter(id => L.rides[id].bike === bid).map(id => withId('rides', id)));
+}
+/* Schreibvorgänge dieses Fensters für ein Motorrad, die noch nicht bestätigt sind */
+export const pendingFor = bid => Object.keys(pend).some(p => pend[p] && pend[p].bike === bid);
+async function commitRun(items, files, label, ep, out, expect){
   if (!ready()) { S.lastErr = notReady(); return 'fail'; }
   const t = T();
   if (t && t.latency) await wait(t.latency);
@@ -290,7 +299,7 @@ async function commitRun(items, files, label, ep, out){
     ((res && res.removed) || []).forEach(x => { if (x.doc && L[x.store]) { delete L[x.store][x.doc.id]; mirror(x.store, x.doc.id); } });
     if (out) out.removed = (res && res.removed) || [];
     if (late) touched.forEach(c => emit(c));
-  }, {epoch: ep});
+  }, {epoch: ep, expect: expect || null});
   if (r.err) { S.lastErr = r.err; return isFinal(r.err) ? 'fail' : verify(); }
   if (r.timeout) { S.lastErr = {code: 'timeout'}; return 'unclear'; }
   if (t && t.writes) t.writes.push('commit ' + (label || first));

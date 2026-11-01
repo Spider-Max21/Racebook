@@ -17,6 +17,8 @@
      nicht Teil der Sicherung.
    - Keine Oberfläche, keine Fachlogik. */
 
+import {bikeFp} from './util.js';
+
 export const DB_NAME = 'racebook';
 export const DB_VERSION = 3;
 export const REC = ['bikes', 'log', 'rides', 'setups', 'parts', 'defects'];
@@ -67,7 +69,7 @@ export function mapErr(e){
   return {code, message: (e && e.message) || ''};
 }
 /* Diese Fehler bedeuten sicher: nichts gespeichert */
-export const FINAL_CODES = ['quota_exceeded', 'aborted', 'closed', 'version', 'not_found', 'clone', 'constraint', 'blocked', 'unknown', 'invalid', 'stale', 'orphan'];
+export const FINAL_CODES = ['quota_exceeded', 'aborted', 'closed', 'version', 'not_found', 'clone', 'constraint', 'blocked', 'unknown', 'invalid', 'stale', 'orphan', 'changed'];
 
 let db = null, name = DB_NAME, chan = null;
 const changeCbs = [];
@@ -152,6 +154,9 @@ export const epochOf = meta => { const i = (meta || []).find(m => m && m.k === '
        nachkaufen ab). op: feste Vorgangskennung; schon angewendet → nichts ändern (Ergebnis dup).
    opts.bump (Standard true): Änderungszähler für die Sicherungserinnerung erhöhen.
    opts.epoch: Bestandskennung, zu der der Vorgang gehört. Stimmt sie nicht mehr, wird nichts geschrieben.
+   opts.expect: {bike, fp} – nur schreiben, wenn Motorrad, Logbuch und Fahrten dieses Motorrads im Speicher noch genau
+     dem Stand entsprechen, auf dem der Vorgang beruht (Fingerabdruck, util.bikeFp); sonst Fehler 'changed'.
+     Für Berichtigungen, deren Vorschau aus mehreren Einträgen berechnet wurde.
    Ergebnis: {changeSeq, removed: [{store, doc}], adjusted: [{id, doc, dup}]} oder Fehler {code}. */
 const LEDGER_MAX = 1000;
 const needsBike = o => {
@@ -177,6 +182,8 @@ export function commit(ops, opts){
     const adj = ops.filter(o => o.type === 'adjust');
     if (adj.some(o => o.store !== 'parts' || !validOp(o.op) || !Number.isInteger(o.add))) { reject({code: 'invalid', message: 'Ungültige Bestandsänderung'}); return; }
     if (bump || guard || adj.length) stores.add('meta');
+    const expect = opts.expect && typeof opts.expect.fp === 'string' ? opts.expect : null;
+    if (expect) ['bikes', 'log', 'rides'].forEach(s => stores.add(s));
     if (ops.some(needsBike)) stores.add('bikes');
     if (ops.some(o => o.type === 'delBike')) REC.forEach(s => stores.add(s));
     let tx;
@@ -273,15 +280,30 @@ export function commit(ops, opts){
         }
       } catch (e) { fail(mapErr(e)); }
     };
+    /* Vor dem Schreiben prüfen (in derselben Transaktion): Bestandskennung, dann der erwartete Stand */
+    const checkExpect = next => {
+      if (!expect) { next(); return; }
+      const got = {};
+      let left = 3;
+      const done1 = () => {
+        if (--left || injected) return;
+        const fp = bikeFp(got.bike || null, (got.log || []).filter(d => d && d.bike === expect.bike), (got.rides || []).filter(d => d && d.bike === expect.bike));
+        if (fp !== expect.fp) { fail({code: 'changed', message: 'Die Daten des Motorrads haben sich inzwischen geändert.'}); return; }
+        next();
+      };
+      const b = tx.objectStore('bikes').get(expect.bike); b.onsuccess = () => { got.bike = b.result || null; done1(); };
+      const l = tx.objectStore('log').getAll(); l.onsuccess = () => { got.log = l.result; done1(); };
+      const r = tx.objectStore('rides').getAll(); r.onsuccess = () => { got.rides = r.result; done1(); };
+    };
     if (guard) {
       /* Bestandskennung zuerst lesen; erst wenn sie stimmt, wird geschrieben */
       const r = tx.objectStore('meta').get('info');
       r.onsuccess = () => {
         const ep = (r.result && typeof r.result.epoch === 'string') ? r.result.epoch : '';
         if (ep !== opts.epoch) { fail({code: 'stale', message: 'Der Bestand wurde inzwischen ersetzt.'}); return; }
-        run();
+        checkExpect(run);
       };
-    } else run();
+    } else checkExpect(run);
   });
 }
 

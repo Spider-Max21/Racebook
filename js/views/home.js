@@ -30,7 +30,8 @@ export function bikeCard(b){
     + '<span class="bc-body">'
     + '<span class="bc-name">' + esc(titleOf(b)) + '</span>'
     + (sub ? '<span class="bc-sub">' + esc(sub) + '</span>' : '')
-    + '<span class="bc-count"><span class="plate sm">' + (cur == null ? '–' : fmt(cur)) + '<small>' + u + '</small></span><span class="bc-count-l">' + (cur == null ? 'Stand unbekannt' : (u === 'km' ? 'Kilometerstand' : 'Betriebsstunden')) + '</span></span>'
+    + '<span class="bc-count"><span class="plate sm">' + (cur == null ? '–' : fmt(cur)) + '<small>' + u + '</small></span><span class="bc-count-l">' + (cur == null ? 'Stand unbekannt' : (st.off ? 'Zähleranzeige' : (u === 'km' ? 'Kilometerstand' : 'Betriebsstunden')))
+    + (st.off && st.tot != null ? '<span class="bc-total">Gesamt ' + fmt(st.tot) + ' ' + u + '</span>' : '') + '</span></span>'
     + '<span class="bc-next">' + next + '</span>'
     + '<span class="bc-foot"><span class="state st-' + st.state + '">' + icon(st.state === 'none' ? 'none' : st.state) + esc(st.text) + '</span>' + unkNote
     + '<span class="bc-defs' + (st.defects ? ' has' : '') + '">' + icon('defects') + esc(defs) + '</span></span>'
@@ -38,7 +39,7 @@ export function bikeCard(b){
 }
 
 function summaryHTML(sum){
-  const extra = [sum.soon ? plural(sum.soon, 'Wartungspunkt ist', 'Wartungspunkte sind') + ' bald fällig.' : '', sum.unknown ? 'Bei ' + plural(sum.unknown, 'Wartungspunkt', 'Wartungspunkten') + ' fehlt die Grundlage (Stand oder Datum).' : ''].filter(Boolean).join(' ');
+  const extra = [sum.soon ? plural(sum.soon, 'Wartungspunkt ist', 'Wartungspunkte sind') + ' bald fällig.' : '', sum.check ? 'Bei ' + plural(sum.check, 'Wartungspunkt', 'Wartungspunkten') + ' passt der Stand nicht zusammen (Wartungsstand prüfen).' : '', sum.unknown ? 'Bei ' + plural(sum.unknown, 'Wartungspunkt', 'Wartungspunkten') + ' fehlt die Grundlage (Stand oder Datum).' : ''].filter(Boolean).join(' ');
   return '<section class="summary" aria-label="Zusammenfassung">'
     + '<div class="sum"><b>' + sum.bikes + '</b><span>' + (sum.bikes === 1 ? 'Motorrad' : 'Motorräder') + '</span></div>'
     + '<div class="sum' + (sum.overdue ? ' is-bad' : '') + '"><b>' + sum.overdue + '</b><span>Wartung überfällig</span></div>'

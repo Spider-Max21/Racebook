@@ -94,6 +94,17 @@ export function towards(base, target, bg, min){ for (let t = 0; t <= 1.0001; t +
 export function onColor(c){ return contrast(c, '#FFFFFF') >= contrast(c, '#15120E') ? '#FFFFFF' : '#15120E'; }
 export function canon(v){ return JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x)) ? Object.keys(x).sort().reduce((a, kk) => { a[kk] = x[kk]; return a; }, {}) : x); }
 export const same = (a, b) => canon(a) === canon(b);
+/* Fingerabdruck des gespeicherten Stands eines Motorrads (Motorrad, Logbuch, Fahrten; je mit id).
+   Gleich berechnet aus der Kopie im Arbeitsspeicher und in der Transaktion aus dem Speicher selbst. */
+export function bikeFp(bike, logs, rides){
+  const byId = (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  const str = canon([bike || null, (logs || []).slice().sort(byId), (rides || []).slice().sort(byId)]);
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) { const ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(36) + '-' + (h1 >>> 0).toString(36) + '-' + str.length.toString(36);
+}
 export function subOf(p, d){
   if (p && typeof p === 'object' && !Array.isArray(p)) return !!d && typeof d === 'object' && Object.keys(p).every(k => subOf(p[k], d[k]));
   return same(p == null ? null : p, d == null ? null : d);
