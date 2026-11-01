@@ -5,14 +5,14 @@ import {esc, str, fmt, eur, uid, v2, validId, safeUrl, turns, isISO, todayISO, f
 import {S, lsSet, lsJSON, bikeList, curBike, U, bikeName} from '../state.js';
 import {CHECK, GROUNDS, WEATHER, FLUIDS, MONTHS, LIM, MAX_COST, BRANDS, BRAND_LIST, KW, INAMES, TEMPLATES, MODELS, MODEL_TPL, SF,
   brandOf, colorOf, plateOf, shortName, curOf, totOf, offOf, posAt, itemState, pillText, sortedItems, svcAtOf, valueAt, hasSetOn,
-  serviceDoc, rideDoc, noteDoc, snapOf, sigOf, localParse, quickKindText, openDefects, DEFECT_PRIOS, canonDoc} from '../domain.js';
+  serviceDoc, rideDoc, noteDoc, snapOf, sigOf, localParse, quickKindText, openDefects, DEFECT_PRIOS, canonDoc, mountTot, ambList, meterSegments, derive} from '../domain.js';
 import * as store from '../store.js';
 import {opFor, parkOp, execOp, bumpGen, lowCheck, addUnres, BIKE_FORMS, cleanupFiles, payloadFiles, flow, reconcile} from '../ops.js';
 import {$, $$, toast, errText, arm, VErr, fieldNum, fieldDate, imgTag, hydrate, fileUrl, icon, fmtSize} from '../ui.js';
 import {makePhoto, makeBikePhoto, makePdf} from '../images.js';
 import {openCropper} from '../cropper.js';
 import {R} from '../registry.js';
-import {jumpOk, typoPlan, checkPlan, openFix, renderMeter, meterPlaceholder, saveMeter, meterName} from './counter.js';
+import {jumpOk, typoPlan, checkPlan, openFix, renderMeter, meterPlaceholder, saveMeter, meterName, askSegments} from './counter.js';
 
 /* ---------- Speichern mit Meldung ---------- */
 const UNCLEAR_MSG = 'Unklar, ob gespeichert wurde. Versuch es gleich nochmal, dabei entsteht nichts doppelt.';
@@ -269,7 +269,10 @@ function renderBanner(){
   if (!el) return;
   if (b) {
     const due = [], soon = [], chk = [];
-    (b.items || []).forEach(it => { const st = itemState(b, it); if (st.s === 'bad') due.push(it.name); else if (st.s === 'warn') soon.push(it.name + ' (' + pillText(b, st) + ')'); else if (st.s === 'chk') chk.push(it.name); });
+    (b.items || []).forEach(it => { const st = itemState(b, it); if (st.s === 'bad') due.push(it.name); else if (st.s === 'warn') soon.push(it.name + ' (' + pillText(b, st) + ')'); else if (st.s === 'chk' && !st.amb) chk.push(it.name); });
+    /* Angaben vom Tag eines Zählerwechsels, bei denen nicht feststeht, welcher Zähler gemeint war (Daten aus 1.1.0 und älter) */
+    const amb = ambList(b);
+    if (amb.length) rows.push('<div class="banner-row chk"><b>' + esc(meterName(b)) + ' ersetzt: Angaben zuordnen</b><span>' + esc(amb.map(a => a.label).join(', ')) + '</span><button class="mini" type="button" data-segfix="' + esc(b.id) + '">Zuordnen</button></div>');
     /* Widerspruch im Verlauf: lässt er sich als Tippfehler berichtigen, gibt es „Prüfen“ (Vorschau), sonst zum Punkt */
     if (chk.length) rows.push(checkPlan(b)
       ? '<div class="banner-row chk"><b>Wartungsstand prüfen</b><span>' + esc(chk.join(', ')) + '</span><button class="mini" type="button" data-chk="' + esc(b.id) + '">Prüfen</button></div>'
@@ -376,21 +379,24 @@ export function renderStatus(){
 export const prioRank = d => ({high: 0, mid: 1, low: 2})[d.priority] ?? 1;
 export const prioText = p => (DEFECT_PRIOS.find(x => x[0] === p) || [0, 'mittel'])[1];
 
-/* Gelaufen seit der Montage: Gesamtlaufleistung jetzt minus Gesamtlaufleistung bei der Montage (eingetragen wird die Anzeige) */
-function runtime(b, at, date){
-  const tot = totOf(b); if (at == null || tot == null) return '';
-  const o = date ? posAt(b.id, date, Infinity).off : offOf(b);
-  return fmt(Math.max(0, tot - (at + o))) + ' ' + U(b) + ' gelaufen';
+/* Gelaufen seit der Montage: Gesamtlaufleistung jetzt minus Gesamtlaufleistung bei der Montage (eingetragen wird die
+   Anzeige des Zählers, der damals eingebaut war; welcher das war, bestimmt die Stelle der Angabe im Verlauf, mountTot) */
+function runtime(b, x){
+  const tot = totOf(b); if (!x || x.at == null || tot == null) return '';
+  const m = mountTot(b, x);
+  if (m.amb) return 'Zähler unklar, bitte zuordnen';
+  if (m.tot > tot + 0.005) return 'Montagestand prüfen';
+  return fmt(Math.max(0, Math.round((tot - m.tot) * 100) / 100)) + ' ' + U(b) + ' gelaufen';
 }
 function mountHTML(b){
   const t = b.tires || {}, c = b.chain || {}, tf = t.front || {}, tr = t.rear || {};
   const ratio = (c.front && c.rear) ? ' · ' + fmt(c.rear / c.front, 2) : '';
   const cell = (lbl, val, run) => '<div class="mount-cell"><span class="lbl">' + lbl + '</span><b>' + (val ? esc(val) : '<span class="hint">nicht eingetragen</span>') + '</b>' + (run ? '<span class="run">' + esc(run) + '</span>' : '') + '</div>';
   return '<div class="mount">'
-    + cell('Reifen vorn', tf.model, runtime(b, tf.at, tf.date))
-    + cell('Reifen hinten', tr.model, runtime(b, tr.at, tr.date))
+    + cell('Reifen vorn', tf.model, runtime(b, tf))
+    + cell('Reifen hinten', tr.model, runtime(b, tr))
     + cell('Übersetzung', (c.front && c.rear) ? c.front + ' / ' + c.rear + ratio : '', '')
-    + cell('Kette', [c.brand, c.links ? c.links + ' Glieder' : ''].filter(Boolean).join(', '), runtime(b, c.at, c.date))
+    + cell('Kette', [c.brand, c.links ? c.links + ' Glieder' : ''].filter(Boolean).join(', '), runtime(b, c))
     + '</div>';
 }
 
@@ -684,7 +690,7 @@ function openEdit(key){
     $('#intBody').innerHTML = '<form id="intForm" class="stack" data-bike="' + esc(b.id) + '" novalidate><div class="f"><label for="iUnit">Zählt nach</label><select id="iUnit"><option value="h">Betriebsstunden</option><option value="km">Kilometern</option></select></div>'
       + '<div class="tbl-wrap"><table class="int"><thead><tr><th>Wartungspunkt</th><th>alle ' + u + '</th><th>alle Mon.</th><th>Startwert bei</th><th>Startwert am</th><th><span class="sr">Entfernen</span></th></tr></thead><tbody id="intRows">' + (b.items || []).map(row).join('') + '</tbody></table></div>'
       + '<div class="row"><button class="btn" type="button" id="intAdd">Punkt hinzufügen</button></div>'
-      + '<p class="hint">Den Startwert brauchst du nur, wenn die letzte Arbeit nicht im Logbuch steht. Ein neuerer Logbuch-Eintrag gilt automatisch. Einfacher geht es unter Status über „Erledigt“.' + (offOf(b) ? ' Nach einem Zählerwechsel gilt der Startwert als Anzeige des Zählers, der am Startdatum eingebaut war (ohne Datum: des ersten Zählers).' : '') + '</p>'
+      + '<p class="hint">Den Startwert brauchst du nur, wenn die letzte Arbeit nicht im Logbuch steht. Ein neuerer Logbuch-Eintrag gilt automatisch. Einfacher geht es unter Status über „Erledigt“.' + (offOf(b) ? ' Nach einem Zählerwechsel gilt der Startwert als Anzeige des Zählers, der am Startdatum eingebaut war (ohne Datum: des ersten Zählers). Liegt das Startdatum auf dem Tag eines Zählerwechsels, fragt Racebook beim Speichern, welcher Zähler gemeint ist.' : '') + '</p>'
       + '<div class="row"><button class="btn primary" type="submit">Speichern</button><button class="btn ghost" type="button" data-cancel="int">Abbrechen</button></div></form>';
     $('#iUnit').value = u;
     $('#intAdd').onclick = () => { $('#intRows').insertAdjacentHTML('beforeend', row({})); };
@@ -707,6 +713,33 @@ function syncOemDraft(){
   const u = $('#oemSrcU'); if (u) S.oemDraft.sourceUrl = u.value;
 }
 
+/* Angaben vom Tag eines Zählerwechsels ohne gespeicherte Stelle (aus 1.1.0 und älter): fragen, welcher Zähler gemeint war,
+   und die Stelle nachtragen. Geändert wird nur, was beim Bestätigen noch genau so unklar ist. */
+let segBusy = false;
+async function segFix(b){
+  if (segBusy) return;
+  derive();
+  const rows = ambList(b).map(a => Object.assign({}, a, {key: a.kind + ':' + a.id, label: a.label + ': ' + fmt(a.at, 2) + ' ' + U(b)}));
+  if (!rows.length) { toast('Hier ist nichts mehr zuzuordnen.'); return; }
+  segBusy = true;
+  try {
+    const pick = await askSegments(b, rows);
+    if (!pick) return;
+    const cur = S.bikes[b.id]; if (!cur) return;
+    derive();
+    const still = new Set(ambList(cur).filter(a => rows.some(r => r.key === a.kind + ':' + a.id && r.at === a.at && r.date === a.date)).map(a => a.kind + ':' + a.id));
+    if (!still.size) { toast('Inzwischen geändert. Es wurde nichts gespeichert.'); return; }
+    const patch = {};
+    if ([...still].some(k => k.startsWith('item:'))) patch.items = (cur.items || []).map(it => still.has('item:' + it.id) ? Object.assign({}, it, {lastC: pick['item:' + it.id]}) : it);
+    if (still.has('tire:front') || still.has('tire:rear')) {
+      const t = cur.tires || {};
+      patch.tires = {front: still.has('tire:front') ? Object.assign({}, t.front, {c: pick['tire:front']}) : t.front, rear: still.has('tire:rear') ? Object.assign({}, t.rear, {c: pick['tire:rear']}) : t.rear};
+    }
+    if (still.has('chain:chain')) patch.chain = Object.assign({}, cur.chain, {c: pick['chain:chain']});
+    if (await bikeUpdate(b.id, patch)) toast('Zugeordnet.');
+  } finally { segBusy = false; }
+}
+
 /* Reifen/Kette: Motorrad und Logbuch-Zeilen in EINEM Vorgang. Eine Wiederholung nutzt dieselben IDs. */
 async function saveTC(b){
   const t = b.tires || {}, c = b.chain || {}, tf = t.front || {}, tr = t.rear || {}, lim = LIM[U(b)].cnt;
@@ -718,13 +751,34 @@ async function saveTC(b){
   const fChanged = nf.model && (nf.model !== tf.model || !sm(nf.at, tf.at));
   const rChanged = nr.model && (nr.model !== tr.model || !sm(nr.at, tr.at));
   const cChanged = (nc.brand || nc.front || nc.rear) && (nc.brand !== (c.brand || '') || !sm(nc.at, c.at) || !sm(nc.front, c.front) || !sm(nc.rear, c.rear));
-  [[fChanged, nf], [rChanged, nr], [cChanged, nc]].forEach(([ch, o]) => { if (ch) { if (!o.date) o.date = today; if (o.at == null && o.date === today) o.at = cur; } });
+  const auto = new Set();
+  [[fChanged, nf], [rChanged, nr], [cChanged, nc]].forEach(([ch, o]) => { if (ch) { if (!o.date) o.date = today; if (o.at == null && o.date === today) { o.at = cur; auto.add(o); } } });
   const o = opFor('tcForm', b.id, 'bikes', null, canon([nf, nr, nc])); if (o.saving) return false;
   o.noTrack = true;
+  /* Welcher Zähler war gemeint? Neu eingetragene Montagen behalten ihre Stelle im Verlauf (Erfassungszeit c), damit ein
+     späterer Zählerwechsel am selben Tag sie nicht dem neuen Zähler zuschlägt. Liegt das Datum auf einem Tag mit
+     Zählerwechsel, wird gefragt (außer der Stand wurde eben aus der aktuellen Anzeige übernommen). Unverändert = wie bisher. */
+  if (!o.payload) {
+    derive();
+    const ask = [];
+    for (const [ch, x, prev, key, lbl] of [[fChanged, nf, tf, 'front', 'Reifen vorn'], [rChanged, nr, tr, 'rear', 'Reifen hinten'], [cChanged, nc, c, 'chain', 'Kette']]) {
+      const same = sm(x.at, prev.at) && (x.date || '') === (prev.date || '');
+      if (x.at == null || !x.date) continue;
+      if (same && prev.c != null) { x.c = prev.c; continue; }
+      if (same) continue;
+      if (auto.has(x) || !meterSegments(b, x.date).length) { x.c = o.created; continue; }
+      ask.push({key, label: lbl + ' montiert bei ' + fmt(x.at, 2) + ' ' + U(b), date: x.date, x});
+    }
+    if (ask.length) {
+      const pick = await askSegments(b, ask);
+      if (!pick) return false;
+      ask.forEach(a => { a.x.c = pick[a.key]; });
+    }
+  }
   /* Auffällig hoher Montage-Stand? Nur geänderte Werte, verglichen mit dem Stand am Montagedatum */
   if (!o.payload) for (const [ch, x, prevAt, el] of [[fChanged, nf, tf.at, 'tfA'], [rChanged, nr, tr.at, 'trA'], [cChanged, nc, c.at, 'cA']]) {
     if (!ch || x.at == null || sm(x.at, prevAt)) continue;
-    if (!(await jumpOk(o, b, x.date || today, x.at, el, posAt(b.id, x.date || today, Infinity).disp))) return false;
+    if (!(await jumpOk(o, b, x.date || today, x.at, el, posAt(b.id, x.date || today, x.c != null ? x.c : Infinity).disp))) return false;
   }
   if (!o.payload) {
     const now = o.created, base = {bike: b.id, tasks: [], taskNames: [], extra: '', cost: null, note: '', atAuto: false};
@@ -763,12 +817,29 @@ async function saveInt(b){
       lastDate: fieldDate(el('lastDate'), lbl + ', Startdatum'),
       kw: prev.kw || [name.toLowerCase()]};
   }).filter(Boolean);
-  /* Geänderter Startwert deutlich über dem Stand am Startdatum (ohne Datum: heute)? */
+  /* Stelle des Startwerts im Verlauf (lastC): unverändert = wie bisher; neu oder geändert = jetzt erfasst, damit ein
+     späterer Zählerwechsel am selben Tag ihn nicht dem neuen Zähler zuschlägt. Am Tag eines Zählerwechsels wird gefragt. */
+  derive();
+  const now = Date.now(), ask = [];
+  for (const it of items) {
+    const prev = old.find(x => x.id === it.id);
+    if (it.lastAt == null || !it.lastDate) continue;
+    const same = prev && prev.lastAt === it.lastAt && (prev.lastDate || null) === it.lastDate;
+    if (same) { if (prev.lastC != null) it.lastC = prev.lastC; continue; }
+    if (!meterSegments(b, it.lastDate).length) { it.lastC = now; continue; }
+    ask.push({key: it.id, label: 'Startwert ' + it.name + ': ' + fmt(it.lastAt, 2) + ' ' + U(b), date: it.lastDate, it});
+  }
+  if (ask.length) {
+    const pick = await askSegments(b, ask);
+    if (!pick) return false;
+    ask.forEach(a => { a.it.lastC = pick[a.key]; });
+  }
+  /* Geänderter Startwert deutlich über dem Stand am Startdatum (ohne Datum: heute)? Verglichen mit dem Zähler, der gemeint ist */
   for (const it of items) {
     const prev = old.find(x => x.id === it.id);
     if (it.lastAt == null || (prev && prev.lastAt === it.lastAt)) continue;
     const el = $$('#intRows tr').find(tr => tr.dataset.id === it.id);
-    const cmp = it.lastDate ? posAt(b.id, it.lastDate, Infinity).disp : curOf(b);
+    const cmp = it.lastDate ? posAt(b.id, it.lastDate, it.lastC != null ? it.lastC : Infinity).disp : curOf(b);
     if (!(await jumpOk(null, b, it.lastDate || todayISO(), it.lastAt, el ? $('[data-k="lastAt"]', el) : null, cmp))) return false;
   }
   if (await bikeUpdate(b.id, {items, unit})) { toast('Gespeichert.'); return true; }
@@ -973,6 +1044,7 @@ export async function onClick(t){
     return true;
   }
   if (t.dataset.chk) { const b = S.bikes[t.dataset.chk]; if (!b || !openFix(checkPlan(b), {})) toast('Hier lässt sich nichts automatisch berichtigen. Prüf den Wartungspunkt und den Stand.'); return true; }
+  if (t.dataset.segfix) { const b = S.bikes[t.dataset.segfix]; if (b) segFix(b); return true; }
   if (t.dataset.qtypo != null) {
     const p = S.pending; if (!p || p.saving) return true;
     const x = p.entries[+t.dataset.qtypo], b = x && S.bikes[x.bike]; if (!b) return true;

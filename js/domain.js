@@ -30,12 +30,22 @@ export const ZIP_FORMAT = 'racebook-backup';
 /* Sicherungsformat: 4 = Standard. 5 = wie 4, zusätzlich der Teil „verwaist“ (Einträge ohne Motorrad aus einer
    früheren Version). 6 = Logbuch enthält Zählerwechsel (kind 'meter', Feld meterNew) oder berichtigte Stände
    (Feld fix); ältere Versionen lehnen sie als „neuer“ ab, statt diese Angaben still zu verlieren.
-   Ohne solche Einträge schreibt die App weiter Version 4 bzw. 5. */
-export const ZIP_VERSION = 6;
+   7 (ab 1.1.1) = zusätzlich ist bei einem Motorrad mit Zählerwechsel gespeichert, an welcher Stelle seines Tages ein
+   Startwert oder eine Montage eingetragen wurde (Felder lastC bzw. c). 1.1.0 kennt diese Felder nicht und würde
+   solche Angaben wieder dem Zähler am Tagesende zuordnen; deshalb lehnt es Version 7 als „neuer“ ab.
+   Ohne solche Einträge schreibt die App weiter Version 4, 5 bzw. 6. */
+export const ZIP_VERSION = 7;
+export const ZIP_VERSION_METER = 6;
 export const ZIP_VERSION_ORPH = 5;
 export const ZIP_VERSION_PLAIN = 4;
 /* Enthält der Bestand Angaben, die erst ab Sicherungsversion 6 lesbar sind? */
 export const needsV6 = next => Object.values((next && next.log) || {}).some(l => l && (l.kind === 'meter' || l.fix != null));
+/* Version 7: Motorrad mit Zählerwechsel, dessen Startwerte oder Montagen ihre Stelle im Tag mitbringen */
+export const needsV7 = next => {
+  const meterBikes = new Set(Object.values((next && next.log) || {}).filter(l => l && l.kind === 'meter').map(l => l.bike));
+  return Object.entries((next && next.bikes) || {}).some(([id, b]) => meterBikes.has(id) && b && (
+    (b.items || []).some(it => it && it.lastC != null) || [b.tires && b.tires.front, b.tires && b.tires.rear, b.chain].some(x => x && x.c != null)));
+};
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
 const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
@@ -161,12 +171,17 @@ export function cleanBike(x, strict, where){
     const id = h.id(it.id, w + ' (ID)');
     if (id && seen.has(id)) { h.fail(w, 'kommt doppelt vor.'); return null; }
     if (id) seen.add(id);
-    return {id, name: h.s(it.name, w + ' (Name)', {req:true, max:120}),
+    const o = {id, name: h.s(it.name, w + ' (Name)', {req:true, max:120}),
       every: h.n(it.every, w + ' (Intervall)', {gt:0, max:1e7}), months: h.n(it.months, w + ' (Monate)', {int:true, min:1, max:240}),
       lastAt: h.n(it.lastAt, w + ' (Startwert)', {min:0, max:1e7}), lastDate: h.d(it.lastDate, w + ' (Startdatum)'),
       kw: h.a(it.kw, w + ' (Stichworte)').filter(k => typeof k === 'string' && k.length <= 60).slice(0, 20)};
+    /* ab 1.1.1: Stelle des Startwerts im Verlauf seines Tages (wie die Erfassungszeit eines Logbuch-Eintrags) */
+    const lc = h.n(it.lastC, w + ' (Erfassungszeit Startwert)', {int:true, min:0});
+    if (lc != null && o.lastAt != null && o.lastDate) o.lastC = lc;
+    return o;
   }).filter(it => it && it.id && it.name);
-  const tire = (t, f) => { t = h.o(t, f); return {model: h.s(t.model, f + ' Modell', {max:120}), at: h.n(t.at, f + ' Stand', {min:0, max:1e7}), date: h.d(t.date, f + ' Datum') || ''}; };
+  const withC = (o, v, f) => { const c = h.n(v, f + ' Erfassungszeit', {int:true, min:0}); if (c != null && o.at != null && o.date) o.c = c; return o; };
+  const tire = (t, f) => { t = h.o(t, f); return withC({model: h.s(t.model, f + ' Modell', {max:120}), at: h.n(t.at, f + ' Stand', {min:0, max:1e7}), date: h.d(t.date, f + ' Datum') || ''}, t.c, f); };
   const tires = h.o(x.tires, 'Reifen'), chain = h.o(x.chain, 'Kette'), fl = h.o(x.fluids, 'Öle'), oem = h.o(x.oem, 'Herstellervorgaben');
   const fluids = {};
   FLUIDS.forEach(([k, l]) => { const f = h.o(fl[k], l); fluids[k] = {brand: h.s(f.brand, l, {max:120}), spec: h.s(f.spec, l, {max:120}), qty: h.s(f.qty, l, {max:60})}; });
@@ -191,7 +206,7 @@ export function cleanBike(x, strict, where){
     unit: h.one(x.unit, 'Einheit', ['h', 'km'], 'h'), current: h.n(x.current, 'Startstand', {min:0, max:1e7}), currentT: h.n(x.currentT, 'Startzeit', {int:true, min:0}),
     color, order: h.n(x.order, 'Reihenfolge', {int:true, min:0, max:9999}), items, fluids,
     tires: {front: tire(tires.front, 'Reifen vorn'), rear: tire(tires.rear, 'Reifen hinten')},
-    chain: {front: h.n(chain.front, 'Ritzel', {int:true, min:5, max:99}), rear: h.n(chain.rear, 'Kettenrad', {int:true, min:5, max:99}), brand: h.s(chain.brand, 'Kette', {max:120}), links: h.n(chain.links, 'Kettenglieder', {int:true, min:40, max:250}), at: h.n(chain.at, 'Kette Stand', {min:0, max:1e7}), date: h.d(chain.date, 'Kette Datum') || ''},
+    chain: withC({front: h.n(chain.front, 'Ritzel', {int:true, min:5, max:99}), rear: h.n(chain.rear, 'Kettenrad', {int:true, min:5, max:99}), brand: h.s(chain.brand, 'Kette', {max:120}), links: h.n(chain.links, 'Kettenglieder', {int:true, min:40, max:250}), at: h.n(chain.at, 'Kette Stand', {min:0, max:1e7}), date: h.d(chain.date, 'Kette Datum') || ''}, chain.c, 'Kette'),
     oem: {rows: h.a(oem.rows, 'Herstellervorgaben').filter(r => r && typeof r === 'object').slice(0, 50).map(r => ({when: h.s(r.when, 'Herstellervorgabe', {max:60}), what: h.s(r.what, 'Herstellervorgabe', {max:300})})), note: h.s(oem.note, 'Hinweis', {max:2000}), sourceTitle: h.s(oem.sourceTitle, 'Quelle', {max:200}), sourceUrl: safeUrl(oem.sourceUrl)},
     manual
   };
@@ -286,7 +301,7 @@ export function deriveBike(b, logs, rides){
   ev.sort(cmpEv);
   let cur = null, off = 0; const probe = {}, poff = {};
   ev.forEach(e => {
-    e.prev = cur;
+    e.prev = cur; e.prevOff = off;
     if (e.k === 'set') cur = off ? r2(e.v + off) : e.v;
     else if (e.k === 'add') { if (cur != null) cur = r2(cur + e.v); }
     else if (e.k === 'meter') {
@@ -297,14 +312,15 @@ export function deriveBike(b, logs, rides){
     e.tot = cur; e.off = off;
     if (e.probe) { probe[e.id] = cur; poff[e.id] = off; }
   });
-  /* Startwert aus den Intervallen: Anzeige am Startdatum (ohne Datum: vor allem anderen) */
-  const offEnd = date => { let o = 0; const key = {date, ph: 2, c: 0, id: ''}; for (const e of ev) { if (cmpEv(e, key) >= 0) break; o = e.off; } return o; };
+  /* Startwert aus den Intervallen: Anzeige am Startdatum (ohne Datum: vor allem anderen, also erster Zähler).
+     Welcher Zähler gemeint ist, bestimmt die Stelle im Verlauf (offAtPos); am Tag eines Zählerwechsels ohne
+     gespeicherte Stelle (Angaben aus 1.1.0 und älter) ist das unklar: dann kein Wert, sondern amb (zum Klären) */
   const items = {};
   (b.items || []).forEach(it => {
     let best = null;
     if (it.lastAt != null || it.lastDate) {
-      const o = it.lastAt != null && it.lastDate ? offEnd(it.lastDate) : 0;
-      best = {at: it.lastAt != null ? (o ? r2(it.lastAt + o) : it.lastAt) : null, disp: it.lastAt, date: it.lastDate || null, src: 'base', key: (it.lastDate || '') + '|0'};
+      const p = it.lastAt != null && it.lastDate ? offAtPos(ev, it.lastDate, it.lastC) : {off: 0, amb: false};
+      best = {at: it.lastAt != null && !p.amb ? (p.off ? r2(it.lastAt + p.off) : it.lastAt) : null, disp: it.lastAt, date: it.lastDate || null, src: 'base', key: (it.lastDate || '') + '|0', amb: !!(p.amb && it.lastAt != null)};
     }
     logs.forEach(l => {
       if (l.bike !== b.id || l.kind !== 'service' || !isISO(l.date) || !l.tasks.includes(it.id)) return;
@@ -316,6 +332,50 @@ export function deriveBike(b, logs, rides){
     items[it.id] = best;
   });
   return {cur: cur == null ? null : (off ? r2(cur - off) : cur), tot: cur, off, items, ev, probe, poff};
+}
+/* Abstand Gesamt − Anzeige an einer Stelle des Tages date. c = Erfassungszeit der Angabe (Stelle im Verlauf des Tages).
+   Ohne c: eindeutig nur, wenn an diesem Tag kein Zähler gewechselt wurde (dann ist der Abstand den ganzen Tag gleich). */
+export function offAtPos(ev, date, c){
+  const swapDay = ev.some(e => e.k === 'meter' && e.date === date);
+  if (c == null && swapDay) return {off: null, amb: true};
+  const key = c == null ? {date, ph: 2, c: 0, id: ''} : {date, ph: 1, c, id: '\uffff'};
+  let o = 0; for (const e of ev) { if (cmpEv(e, key) >= 0) break; o = e.off; }
+  return {off: o, amb: false};
+}
+/* Zählerwechsel an einem Tag (in der Reihenfolge ihrer Erfassung) und die Stellen davor/dazwischen/danach zur Auswahl:
+   [{c, label}] – c ist die Erfassungszeit, die eine Angabe in genau diesen Zählerabschnitt legt */
+export function meterSegments(b, date, d){
+  d = d || S.der[b.id]; if (!d) return [];
+  const sw = d.ev.filter(e => e.k === 'meter' && e.date === date);
+  if (!sw.length) return [];
+  const u = U(b), n = sw.length, hv = v => fmt(v, 2) + ' ' + u;
+  const disp = e => e.prev == null ? null : (e.prevOff ? r2(e.prev - e.prevOff) : e.prev);
+  const out = [];
+  for (let k = 0; k <= n; k++) {
+    const from = k ? sw[k - 1].nv : null, to = k < n ? (sw[k].v != null ? sw[k].v : disp(sw[k])) : null;
+    const name = k === 0 ? 'Alter Zähler' : k === n ? 'Neuer Zähler' : (n > 2 ? k + '. Ersatzzähler' : 'Zwischenzeitlicher Zähler');
+    const range = k === 0 ? (to != null ? 'bis ' + hv(to) : 'vor dem Wechsel') : k === n ? 'ab ' + hv(from) : hv(from) + ' bis ' + (to != null ? hv(to) : '…');
+    out.push({c: k === 0 ? Math.max(0, sw[0].c - 1) : sw[k - 1].c, label: name + ' (' + range + ')'});
+  }
+  return out;
+}
+/* Montage von Reifen/Kette: Gesamtlaufleistung bei der Montage; amb = Tag eines Zählerwechsels ohne gespeicherte Stelle */
+export function mountTot(b, x, d){
+  d = d || S.der[b.id];
+  if (!d || !x || x.at == null) return {tot: null, amb: false};
+  if (!x.date) return {tot: d.off ? r2(x.at + d.off) : x.at, amb: false};
+  const p = offAtPos(d.ev, x.date, x.c);
+  return p.amb ? {tot: null, amb: true} : {tot: p.off ? r2(x.at + p.off) : x.at, amb: false};
+}
+/* Angaben, deren Zähler am Tag eines Zählerwechsels unklar ist (nur, wo sie noch etwas bewirken) */
+export function ambList(b, d){
+  d = d || S.der[b.id]; if (!d) return [];
+  const out = [], u = U(b);
+  (b.items || []).forEach(it => { const m = d.items[it.id]; if (it.every && m && m.src === 'base' && m.amb) out.push({kind: 'item', id: it.id, label: 'Startwert ' + it.name, at: it.lastAt, date: it.lastDate}); });
+  const t = b.tires || {}, c = b.chain || {};
+  [['front', t.front, 'Reifen vorn'], ['rear', t.rear, 'Reifen hinten']].forEach(([k, x, l]) => { if (x && x.model && mountTot(b, x, d).amb) out.push({kind: 'tire', id: k, label: l + ' montiert', at: x.at, date: x.date}); });
+  if ((c.brand || c.front || c.rear) && mountTot(b, c, d).amb) out.push({kind: 'chain', id: 'chain', label: 'Kette montiert', at: c.at, date: c.date});
+  return out;
 }
 export function derive(){
   const der = {};
@@ -365,6 +425,8 @@ export function itemState(b, it, d){
   /* Widerspruch: die letzte Wartung steht bei mehr als dem heutigen Stand (meist nach einem Tippfehler).
      Dann keine Restlaufzeit ausrechnen, sondern zum Prüfen auffordern. */
   if (it.every && lastAt != null && cur != null && lastAt > cur + 0.005) return {s:'chk', used:0, remain: null, days, f: -1, frac: null, dfrac, m};
+  /* Startwert vom Tag eines Zählerwechsels, ohne dass feststeht, welcher Zähler gemeint war: erst klären lassen */
+  if (it.every && m && m.amb) return {s:'chk', amb: true, used:0, remain: null, days, f: -1, frac: null, dfrac, m};
   if (it.every && lastAt != null && cur != null) { remain = Math.round((lastAt + it.every - cur) * 100) / 100; frac = remain / it.every; }
   if (frac == null && dfrac == null) return {s:'unk', used:0, remain, days, f:Infinity, m};
   const f = Math.min(frac == null ? Infinity : frac, dfrac == null ? Infinity : dfrac);
@@ -1011,7 +1073,8 @@ export function fixResult(b, logs, rides, plan, choice, stamp){
    der jüngste niedrigere Stand, dessen Berichtigung mindestens einen Punkt mit diesem Zustand auflöst */
 export function fixCandidate(b){
   const d = S.der[b.id]; if (!d) return null;
-  const chk = (b.items || []).filter(it => itemState(b, it).s === 'chk');
+  /* Unklare Startwerte am Tag eines Zählerwechsels sind kein Tippfehler: die klärt „Zuordnen“ (ambList) */
+  const chk = (b.items || []).filter(it => { const st = itemState(b, it); return st.s === 'chk' && !st.amb; });
   if (!chk.length) return null;
   for (let i = d.ev.length - 1; i >= 0; i--) {
     const e = d.ev[i];

@@ -5,11 +5,11 @@
 import * as DB from './db.js';
 import {makeZip, readZip, isZip} from './zip.js';
 import {sha256, sniff} from './images.js';
-import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans, needsV6, ZIP_FORMAT, ZIP_VERSION, ZIP_VERSION_ORPH, ZIP_VERSION_PLAIN, DEP_COLLS, KEYS, NAMES} from './domain.js';
+import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans, needsV6, needsV7, ZIP_FORMAT, ZIP_VERSION, ZIP_VERSION_METER, ZIP_VERSION_ORPH, ZIP_VERSION_PLAIN, DEP_COLLS, KEYS, NAMES} from './domain.js';
 import {COLLS} from './state.js';
 import {pad, canon, isISO, fmtDate} from './util.js';
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.1.1';
 export const V8_LOCAL_KEY = 'wh-garage-local';
 const MAX_JSON = 60 * 1024 * 1024;
 const enc = new TextEncoder();
@@ -49,7 +49,7 @@ export async function buildBackup(){
   const now = new Date();
   const byId = (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   /* Version nur so hoch wie nötig: ältere App-Versionen können Sicherungen ohne neue Angaben weiter lesen */
-  const json = {format: ZIP_FORMAT, version: needsV6(next) ? ZIP_VERSION : sp.count ? ZIP_VERSION_ORPH : ZIP_VERSION_PLAIN, app: APP_VERSION, exportiert: now.toISOString(), stand: {changeSeq: info.changeSeq || 0}};
+  const json = {format: ZIP_FORMAT, version: needsV7(next) ? ZIP_VERSION : needsV6(next) ? ZIP_VERSION_METER : sp.count ? ZIP_VERSION_ORPH : ZIP_VERSION_PLAIN, app: APP_VERSION, exportiert: now.toISOString(), stand: {changeSeq: info.changeSeq || 0}};
   COLLS.forEach(c => { json[KEYS[c]] = (recs[c] || []).filter(d => c === 'bikes' || sp.clean[c][d.id]).sort(byId); });
   if (sp.count) {
     json.verwaist = {};

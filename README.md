@@ -1,4 +1,4 @@
-# Racebook – eigenständige App (PWA), Version 1.1.0
+# Racebook – eigenständige App (PWA), Version 1.1.1
 
 Racebook ist ein Wartungsheft für Motorräder: Wartung und Fälligkeiten, Logbuch, Fahrten, Fahrwerk-Setups, Teilevorrat, Mängel, Fotos und Bedienungsanleitung. Diese Fassung läuft als installierbare Web-App (PWA) im Browser, speichert alles **nur auf dem Gerät** (IndexedDB) und funktioniert nach dem ersten Laden auch ohne Netz.
 
@@ -78,7 +78,7 @@ Eine leere Garage wird nie als erfolgreiche Übernahme gemeldet: Ohne Motorräde
 ## 5. Sicherung und Wiederherstellung
 
 - **Sicherung erstellen:** Daten & Sicherung → „Sicherung herunterladen“. Es entsteht eine ZIP-Datei `racebook-sicherung-JJJJ-MM-TT-HHMM.zip` mit
-  - `racebook.json`: alle Einträge (Format `racebook-backup`, Version 4; Version 5, wenn Einträge ohne Motorrad dabei sind, siehe unten; Version 6, wenn ein Zählerwechsel oder eine Tippfehler-Berichtigung gespeichert ist, siehe Abschnitt 9a),
+  - `racebook.json`: alle Einträge (Format `racebook-backup`, Version 4; Version 5, wenn Einträge ohne Motorrad dabei sind, siehe unten; Version 6, wenn ein Zählerwechsel oder eine Tippfehler-Berichtigung gespeichert ist, siehe Abschnitt 9a; Version 7, wenn bei einem Motorrad mit Zählerwechsel Startwerte oder Montagen ihre Stelle im Tag mitbringen – 1.1.0 lehnt diese mit Hinweis ab, statt sie falsch zuzuordnen),
   - `dateien/…`: alle Fotos und PDFs als echte Dateien, jeweils mit SHA-256-Prüfsumme in `racebook.json`,
   - `LIESMICH.txt`: kurze Erklärung.
 - **„Sicherung teilen …“** übergibt die ZIP-Datei an Android (z. B. Google Drive, Mail).
@@ -97,7 +97,7 @@ Ist eine neue Version veröffentlicht, lädt die App sie im Hintergrund und zeig
 
 ### Für die Veröffentlichung einer neuen Version
 1. Dateien ändern.
-2. In `sw.js` die Konstante `VERSION` erhöhen (z. B. `racebook-1.1.0`) und in `js/backup.js` `APP_VERSION` anpassen. Ohne neue `VERSION` bekommen installierte Apps die Änderungen nicht.
+2. In `sw.js` die Konstante `VERSION` erhöhen (z. B. `racebook-1.1.1`) und in `js/backup.js` `APP_VERSION` anpassen. Ohne neue `VERSION` bekommen installierte Apps die Änderungen nicht.
 3. Neue Dateien auf dieselbe Adresse hochladen.
 4. Ändert sich das Speicherformat: in `js/db.js` `DB_VERSION` erhöhen und **hinten** an `MIGRATIONS` einen neuen Schritt anhängen. Bestehende Schritte nie ändern oder löschen. Jeder Schritt läuft in derselben Transaktion; bei einem Fehler bricht der Browser alles ab. Aktuell ist `DB_VERSION` 3 (Schritt 3 legt die Bestandskennung an). Noch offene Fenster einer älteren Version werden beim Hochziehen vom Browser getrennt und melden „in einem anderen Fenster aktualisiert“; sie können danach nichts mehr schreiben.
 5. Ändert sich das Sicherungsformat: `ZIP_VERSION` in `js/domain.js` erhöhen und ältere Versionen beim Einspielen weiter lesen können. Die höhere Version nur schreiben, wenn die neuen Angaben wirklich vorkommen (so liest eine ältere App-Version Sicherungen ohne sie weiter).
@@ -105,6 +105,8 @@ Ist eine neue Version veröffentlicht, lädt die App sie im Hintergrund und zeig
 1.1.0 bringt ein neues, neutrales App-Symbol. Bei einer schon installierten App kann das alte Symbol noch eine Weile bleiben, auf dem iPhone auch dauerhaft. Das betrifft nur das Aussehen. Entferne die App deswegen nicht, ohne vorher eine Sicherung zu machen: Mit der App können auch ihre Daten verschwinden.
 
 1.1.0 ändert das Speicherformat nicht (`DB_VERSION` bleibt 3): Logbuch-Einträge bekommen nur bei Bedarf die neuen Felder `meterNew` (Zählerwechsel) und `fix` (Berichtigung). Vorhandene Einträge bleiben Byte für Byte gleich; eine Umwandlung ist nicht nötig.
+
+1.1.1 ebenso: Startwerte und Montagen bekommen beim Speichern nur bei Bedarf das Feld `lastC` bzw. `c` (Stelle im Verlauf ihres Tages, siehe Abschnitt 9a). Angaben aus 1.1.0 und älter bleiben unverändert; liegt eine davon auf dem Tag eines Zählerwechsels, fragt die App einmal nach, welcher Zähler gemeint war.
 
 ## 7. Aufbau
 
@@ -129,7 +131,7 @@ js/zip.js             ZIP schreiben und lesen (ohne fremde Bibliothek)
 js/backup.js          Sicherung, Einspielen, Übernahme der bisherigen Version
 js/views/*.js         Ansichten: Übersicht, Motorrad, Mängel, Daten & Sicherung; counter.js: Rückfrage bei Sprüngen,
                       Tippfehler berichtigen (Vorschau), Zählerwechsel
-tests/                automatische Tests: nicht im App-ZIP, sondern im Test-ZIP racebook-pwa-tests-1.1.0.zip,
+tests/                automatische Tests: nicht im App-ZIP, sondern im Test-ZIP racebook-pwa-tests-1.1.1.zip,
                       das sich in denselben Ordner entpackt (siehe tests/README.md)
 ```
 
@@ -179,6 +181,7 @@ Im Zweifel wird also nichts als erledigt eingetragen. War es doch erledigt, übe
 - **Vorschau:** Vor dem Übernehmen zeigt ein Fenster die falsche Ablesung mit Datum, alten und neuen Wert, alle betroffenen Einträge mit Datum, altem und vorgeschlagenem Stand, und was sich bei den Fälligkeiten ändert. Wartungen „aus dem Verlauf“ (ohne eingetippten Stand) sind vorausgewählt; abwählen hält ihren alten Wert fest. Eingetippte Stände und Einträge unklarer Herkunft (ältere Daten) werden nie von selbst geändert: dort muss „berichtigen“ oder „so lassen“ gewählt werden, sonst lässt sich nichts übernehmen. Gespeichert wird alles in einem Schritt, und nur, wenn sich die Daten des Motorrads seit der Vorschau nicht geändert haben (auch nicht in einem anderen Fenster); sonst wird die Vorschau neu berechnet.
 - **Wartungsstand prüfen:** Liegt die letzte Wartung eines Punkts über dem heutigen Stand (z. B. weil ein Tippfehler schon als Korrektur gespeichert wurde), zeigt Racebook „Wartungsstand prüfen“ statt einer Restlaufzeit. Lässt sich der Widerspruch als Tippfehler berichtigen, steht oben „Prüfen“ und öffnet dieselbe Vorschau.
 - **Zählerwechsel:** Technik → Stundenzähler (bei km-Motorrädern Kilometerzähler) → „Stundenzähler ersetzt“: Datum, letzter Stand des alten Zählers (leer = berechneter Stand) und Anzeige des neuen. Danach trägst du ein, was der neue Zähler anzeigt. Das Schild zeigt die Zähleranzeige, darunter die Gesamtlaufleistung; Fälligkeiten rechnen mit der Gesamtlaufleistung. Beispiel: gesamt 54 h, neuer Zähler 0 h, später Anzeige 3 h → gesamt 57 h; Wartung bei 50 h mit 50-h-Intervall → noch 43 h. Der Wechsel steht im Logbuch und lässt sich dort löschen.
+- **Am Tag eines Zählerwechsels (ab 1.1.1):** Startwerte (Technik → Intervalle) und Montagen (Reifen & Kette) gelten wie Logbuch-Einträge in der Reihenfolge, in der sie eingetragen wurden. Ein Startwert, der vor dem Wechsel am selben Tag eingetragen wurde, gehört also zum alten Zähler, auch nach weiteren Wechseln. Trägst du einen Wert für einen Tag ein, an dem schon ein Zähler gewechselt wurde, fragt Racebook „Welcher Zähler war gemeint?“ (alter, gegebenenfalls zwischenzeitlicher oder neuer Zähler); nichts ist vorausgewählt. Angaben aus 1.1.0 und älter, bei denen das nicht feststeht, zeigen „Wartungsstand prüfen“ bzw. „Zähler unklar“; oben steht „Angaben zuordnen“ mit derselben Auswahl. Liegt eine Montage über dem heutigen Gesamtstand, steht „Montagestand prüfen“ statt „0 h gelaufen“.
 
 ## 10. Mehrere Fenster
 

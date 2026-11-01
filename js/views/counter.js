@@ -1,4 +1,4 @@
-/* Racebook – Zählerstände (ab 1.1.0):
+/* Racebook – Zählerstände (ab 1.1.0; Zuordnung am Tag eines Zählerwechsels ab 1.1.1):
    - Rückfrage vor dem Speichern, wenn ein Stand um mehr als 20 h bzw. 2.000 km über dem passenden bisherigen liegt
      (alle Eingabewege; Vergleich mit dem Stand an der Stelle des Eintrags, rückwirkende Einträge also mit damals)
    - Tippfehler berichtigen: Vorschau mit allen betroffenen Einträgen und den Auswirkungen auf die Wartung;
@@ -6,7 +6,7 @@
    - Zählerwechsel unter Technik → Stundenzähler (Kilometerzähler): Anzeige und Gesamtlaufleistung getrennt */
 import {esc, fmt, uid, v2, todayISO, fmtDate} from '../util.js';
 import {S, U} from '../state.js';
-import {LIM, derive, curOf, totOf, offOf, posAt, jumpText, fixPlan, fixResult, fixCandidate, canonDoc} from '../domain.js';
+import {LIM, derive, curOf, totOf, offOf, posAt, jumpText, fixPlan, fixResult, fixCandidate, canonDoc, meterSegments} from '../domain.js';
 import * as store from '../store.js';
 import {flow, opFor, execOp} from '../ops.js';
 import {$, toast, errText, VErr, fieldNum, fieldDate} from '../ui.js';
@@ -40,6 +40,41 @@ export async function jumpOk(o, b, date, at, el, prev){
   const f = typeof el === 'string' ? $('#' + el) : el;
   if (f && f.isConnected) { f.focus(); try { f.select(); } catch (e) {} }
   return false;
+}
+
+/* ---------- Welcher Zähler war gemeint? (Angaben vom Tag eines Zählerwechsels) ---------- */
+/* rows: [{key, label, date}] → {key: c} (Stelle im Verlauf des Tages) oder null bei „Abbrechen“. Nichts ist vorausgewählt. */
+let segDone = null, segRows = null;
+export function askSegments(b, rows){
+  const dlg = $('#segDlg');
+  if (segDone) segDone(null);
+  derive();
+  segRows = rows.map(r => Object.assign({}, r, {opts: meterSegments(b, r.date)}));
+  const name = meterName(b);
+  $('#segBody').innerHTML = '<p>Am Tag dieser Angaben wurde der ' + esc(name) + ' ersetzt. Welcher Zähler zeigte den Wert?</p>'
+    + segRows.map((r, i) => '<div class="fix-row seg-row" data-key="' + esc(r.key) + '"><b>' + esc(r.label) + '</b><span class="hint">am ' + esc(fmtDate(r.date)) + '</span>'
+      + '<div class="fix-choice" role="radiogroup" aria-label="' + esc(r.label) + '">' + r.opts.map((o, k) => '<label><input type="radio" name="seg-' + i + '" value="' + k + '"> ' + esc(o.label) + '</label>').join('') + '</div></div>').join('');
+  segCheck();
+  return new Promise(res => {
+    segDone = v => { segDone = null; segRows = null; if (dlg.open) dlg.close(); res(v); };
+    dlg.showModal();
+    $('#segTitle').focus();
+  });
+}
+export function closeSeg(){ if (segDone) segDone(null); }
+function segCheck(){
+  const all = segRows && segRows.every((r, i) => !!$('#segBody input[name="seg-' + i + '"]:checked'));
+  $('#segOk').disabled = !all;
+  $('#segNeed').hidden = !!all;
+}
+function segPick(){
+  if (!segRows) return null;
+  const out = {};
+  for (let i = 0; i < segRows.length; i++) {
+    const x = $('#segBody input[name="seg-' + i + '"]:checked'); if (!x) return null;
+    out[segRows[i].key] = segRows[i].opts[+x.value].c;
+  }
+  return out;
 }
 
 /* ---------- Tippfehler berichtigen ---------- */
@@ -240,6 +275,10 @@ export function initCounter(){
   $('#jumpOk').addEventListener('click', () => { if (jumpDone) jumpDone(true); });
   $('#jumpFix').addEventListener('click', () => { if (jumpDone) jumpDone(false); });
   $('#jumpDlg').addEventListener('cancel', e => { e.preventDefault(); if (jumpDone) jumpDone(false); });
+  $('#segDlg').addEventListener('cancel', e => { e.preventDefault(); if (segDone) segDone(null); });
+  $('#segDlg').addEventListener('change', () => segCheck());
+  $('#segOk').addEventListener('click', () => { const p = segPick(); if (p && segDone) segDone(p); });
+  $('#segCancel').addEventListener('click', () => { if (segDone) segDone(null); });
   const dlg = $('#fixDlg');
   dlg.addEventListener('cancel', e => { e.preventDefault(); if (F && !F.busy) closeFix(); });
   dlg.addEventListener('change', e => {

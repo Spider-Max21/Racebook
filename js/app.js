@@ -145,7 +145,7 @@ function onDatasetChange(phase){
   if (phase === 'vorher') {
     resetInfo = {drafts: openDraftCount(), local: !!S.replacing};
     S.ops = {};
-    counter.closeFix();
+    counter.closeFix(); counter.closeSeg();
     if (S.pending) S.pending = null;
     const q = $('#quickText'); if (q) q.value = '';
     bike.renderQuick();
