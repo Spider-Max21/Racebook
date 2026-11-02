@@ -43,39 +43,67 @@ export async function jumpOk(o, b, date, at, el, prev){
 }
 
 /* ---------- Welcher Zähler war gemeint? (Angaben vom Tag eines Zählerwechsels) ---------- */
-/* rows: [{key, label, date}] → {key: c} (Stelle im Verlauf des Tages) oder null bei „Abbrechen“. Nichts ist vorausgewählt. */
-let segDone = null, segRows = null;
-export function askSegments(b, rows){
+/* rows: [{key, label, date}] oder eine Funktion, die die aktuellen Zeilen liefert (z. B. „Angaben zuordnen“).
+   Ergebnis: {pick: {key: c}, fp} – c ist die Stelle im Verlauf des Tages, fp der Datenstand des Motorrads, auf dem die
+   Auswahl beruht (für die Prüfung im Speicher, store.commitR expect) –, null bei „Abbrechen“ oder {stale: true}, wenn
+   eine Angabe nicht mehr zuzuordnen ist. Nichts ist vorausgewählt. Ändert sich der Datenstand des Motorrads, solange die
+   Auswahl offen ist (anderes Fenster, Neuladen), werden Zeilen und Zähler neu berechnet, die bisherige Wahl verworfen
+   und mit Hinweis neu gefragt; eine Entscheidung wird nie stillschweigend auf einen geänderten Verlauf übertragen. */
+let SEG = null;
+const SEG_CHANGED = 'Der Zählerverlauf hat sich inzwischen geändert (zum Beispiel in einem anderen Fenster). Die Auswahl wurde zurückgesetzt. Bitte neu wählen.';
+export function askSegments(b, rows, msg){
   const dlg = $('#segDlg');
-  if (segDone) segDone(null);
-  derive();
-  segRows = rows.map(r => Object.assign({}, r, {opts: meterSegments(b, r.date)}));
-  const name = meterName(b);
-  $('#segBody').innerHTML = '<p>Am Tag dieser Angaben wurde der ' + esc(name) + ' ersetzt. Welcher Zähler zeigte den Wert?</p>'
-    + segRows.map((r, i) => '<div class="fix-row seg-row" data-key="' + esc(r.key) + '"><b>' + esc(r.label) + '</b><span class="hint">am ' + esc(fmtDate(r.date)) + '</span>'
-      + '<div class="fix-choice" role="radiogroup" aria-label="' + esc(r.label) + '">' + r.opts.map((o, k) => '<label><input type="radio" name="seg-' + i + '" value="' + k + '"> ' + esc(o.label) + '</label>').join('') + '</div></div>').join('');
-  segCheck();
+  if (SEG) SEG.done(null);
   return new Promise(res => {
-    segDone = v => { segDone = null; segRows = null; if (dlg.open) dlg.close(); res(v); };
+    SEG = {bid: b.id, src: rows, epoch: S.epoch || '', rows: null, fp: '', msg: msg || '',
+      done: v => { SEG = null; if (dlg.open) dlg.close(); res(v); }};
+    if (!segBuild()) return;
     dlg.showModal();
     $('#segTitle').focus();
   });
 }
-export function closeSeg(){ if (segDone) segDone(null); }
+/* Zeilen und Zähler aus dem aktuellen Stand berechnen und zeichnen. false = nichts mehr zu fragen (Dialog beendet) */
+function segBuild(){
+  const s = SEG, b = S.bikes[s.bid];
+  if (!b || s.epoch !== (S.epoch || '')) { s.done(null); return false; }
+  derive();
+  const src = typeof s.src === 'function' ? s.src() : s.src;
+  const rows = (src || []).map(r => Object.assign({}, r, {opts: meterSegments(b, r.date)}));
+  if (!rows.length || rows.some(r => !r.opts.length)) { s.done({stale: true}); return false; }
+  s.rows = rows; s.fp = store.bikeFpOf(b.id);
+  $('#segBody').innerHTML = '<p>Am Tag dieser Angaben wurde der ' + esc(meterName(b)) + ' ersetzt. Welcher Zähler zeigte den Wert?</p>'
+    + rows.map((r, i) => '<div class="fix-row seg-row" data-key="' + esc(r.key) + '"><b>' + esc(r.label) + '</b><span class="hint">am ' + esc(fmtDate(r.date)) + '</span>'
+      + '<div class="fix-choice" role="radiogroup" aria-label="' + esc(r.label) + '">' + r.opts.map((o, k) => '<label><input type="radio" name="seg-' + i + '" value="' + k + '"> ' + esc(o.label) + '</label>').join('') + '</div></div>').join('');
+  const m = $('#segMsg'); m.textContent = s.msg; m.hidden = !s.msg;
+  segCheck();
+  return true;
+}
+/* Datenstand noch derselbe? Sonst neu berechnen und neu fragen (Ergebnis false) */
+function segFresh(){
+  if (!SEG) return false;
+  if (SEG.epoch !== (S.epoch || '') || !S.bikes[SEG.bid]) { SEG.done(null); return false; }
+  if (store.bikeFpOf(SEG.bid) === SEG.fp) return true;
+  SEG.msg = SEG_CHANGED;
+  segBuild();
+  return false;
+}
+export function closeSeg(){ if (SEG) SEG.done(null); }
+export const segOpen = () => !!SEG;
 function segCheck(){
-  const all = segRows && segRows.every((r, i) => !!$('#segBody input[name="seg-' + i + '"]:checked'));
+  const all = SEG && SEG.rows.every((r, i) => !!$('#segBody input[name="seg-' + i + '"]:checked'));
   $('#segOk').disabled = !all;
   $('#segNeed').hidden = !!all;
 }
 function segPick(){
-  if (!segRows) return null;
+  if (!SEG) return null;
   const out = {};
-  for (let i = 0; i < segRows.length; i++) {
+  for (let i = 0; i < SEG.rows.length; i++) {
     const x = $('#segBody input[name="seg-' + i + '"]:checked'); if (!x) return null;
-    out[segRows[i].key] = segRows[i].opts[+x.value].c;
+    out[SEG.rows[i].key] = SEG.rows[i].opts[+x.value].c;
   }
   return out;
 }
+export const SEG_SAVE_CHANGED = 'Der Zählerverlauf hat sich beim Speichern geändert. Es wurde nichts gespeichert. Bitte neu wählen.';
 
 /* ---------- Tippfehler berichtigen ---------- */
 /* Plan für einen neu eingegebenen, niedrigeren Stand von heute (wird dabei nicht zusätzlich gespeichert) */
@@ -179,6 +207,7 @@ function replan(msg){
 const CHANGED_MSG = 'Die Daten haben sich inzwischen geändert (zum Beispiel in einem anderen Fenster). Die Vorschau ist neu berechnet, bitte prüf sie noch einmal.';
 /* Nach jeder Neuanzeige: Daten geändert → Vorschau neu prüfen */
 export function onRender(){
+  if (SEG) segFresh();
   if (!F || F.busy) return;
   if (F.epoch !== (S.epoch || '') || !S.bikes[F.plan.bike]) { closeFix(); return; }
   if (F.unclear) return;
@@ -275,10 +304,11 @@ export function initCounter(){
   $('#jumpOk').addEventListener('click', () => { if (jumpDone) jumpDone(true); });
   $('#jumpFix').addEventListener('click', () => { if (jumpDone) jumpDone(false); });
   $('#jumpDlg').addEventListener('cancel', e => { e.preventDefault(); if (jumpDone) jumpDone(false); });
-  $('#segDlg').addEventListener('cancel', e => { e.preventDefault(); if (segDone) segDone(null); });
-  $('#segDlg').addEventListener('change', () => segCheck());
-  $('#segOk').addEventListener('click', () => { const p = segPick(); if (p && segDone) segDone(p); });
-  $('#segCancel').addEventListener('click', () => { if (segDone) segDone(null); });
+  $('#segDlg').addEventListener('cancel', e => { e.preventDefault(); if (SEG) SEG.done(null); });
+  $('#segDlg').addEventListener('change', () => { if (SEG) segCheck(); });
+  /* Vor dem Übernehmen noch einmal: beruht die Auswahl auf dem aktuellen Stand? */
+  $('#segOk').addEventListener('click', () => { if (!SEG || !segFresh()) return; const p = segPick(); if (p) SEG.done({pick: p, fp: SEG.fp}); });
+  $('#segCancel').addEventListener('click', () => { if (SEG) SEG.done(null); });
   const dlg = $('#fixDlg');
   dlg.addEventListener('cancel', e => { e.preventDefault(); if (F && !F.busy) closeFix(); });
   dlg.addEventListener('change', e => {

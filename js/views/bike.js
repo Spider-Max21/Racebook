@@ -12,7 +12,7 @@ import {$, $$, toast, errText, arm, VErr, fieldNum, fieldDate, imgTag, hydrate, 
 import {makePhoto, makeBikePhoto, makePdf} from '../images.js';
 import {openCropper} from '../cropper.js';
 import {R} from '../registry.js';
-import {jumpOk, typoPlan, checkPlan, openFix, renderMeter, meterPlaceholder, saveMeter, meterName, askSegments} from './counter.js';
+import {jumpOk, typoPlan, checkPlan, openFix, renderMeter, meterPlaceholder, saveMeter, meterName, askSegments, SEG_SAVE_CHANGED} from './counter.js';
 
 /* ---------- Speichern mit Meldung ---------- */
 const UNCLEAR_MSG = 'Unklar, ob gespeichert wurde. Versuch es gleich nochmal, dabei entsteht nichts doppelt.';
@@ -714,29 +714,36 @@ function syncOemDraft(){
 }
 
 /* Angaben vom Tag eines Zählerwechsels ohne gespeicherte Stelle (aus 1.1.0 und älter): fragen, welcher Zähler gemeint war,
-   und die Stelle nachtragen. Geändert wird nur, was beim Bestätigen noch genau so unklar ist. */
+   und die Stelle nachtragen. Die Auswahl beruht auf einem festgehaltenen Datenstand des Motorrads (fp). Geschrieben wird in
+   einem Vorgang, den der Speicher nur ausführt, wenn der Stand noch derselbe ist (wie bei „Tippfehler berichtigen“);
+   sonst wird nichts gespeichert und neu gefragt. Eine frühere Wahl wird dabei nie übernommen. */
 let segBusy = false;
+const segRowsOf = bid => { const b = S.bikes[bid]; if (!b) return []; derive(); return ambList(b).map(a => Object.assign({}, a, {key: a.kind + ':' + a.id, label: a.label + ': ' + fmt(a.at, 2) + ' ' + U(b)})); };
 async function segFix(b){
   if (segBusy) return;
-  derive();
-  const rows = ambList(b).map(a => Object.assign({}, a, {key: a.kind + ':' + a.id, label: a.label + ': ' + fmt(a.at, 2) + ' ' + U(b)}));
-  if (!rows.length) { toast('Hier ist nichts mehr zuzuordnen.'); return; }
+  if (!segRowsOf(b.id).length) { toast('Hier ist nichts mehr zuzuordnen.'); return; }
   segBusy = true;
   try {
-    const pick = await askSegments(b, rows);
-    if (!pick) return;
-    const cur = S.bikes[b.id]; if (!cur) return;
-    derive();
-    const still = new Set(ambList(cur).filter(a => rows.some(r => r.key === a.kind + ':' + a.id && r.at === a.at && r.date === a.date)).map(a => a.kind + ':' + a.id));
-    if (!still.size) { toast('Inzwischen geändert. Es wurde nichts gespeichert.'); return; }
-    const patch = {};
-    if ([...still].some(k => k.startsWith('item:'))) patch.items = (cur.items || []).map(it => still.has('item:' + it.id) ? Object.assign({}, it, {lastC: pick['item:' + it.id]}) : it);
-    if (still.has('tire:front') || still.has('tire:rear')) {
-      const t = cur.tires || {};
-      patch.tires = {front: still.has('tire:front') ? Object.assign({}, t.front, {c: pick['tire:front']}) : t.front, rear: still.has('tire:rear') ? Object.assign({}, t.rear, {c: pick['tire:rear']}) : t.rear};
+    let msg = '';
+    for (;;) {
+      const res = await askSegments(b, () => segRowsOf(b.id), msg);
+      if (!res) return;
+      if (res.stale) { toast('Der Zählerverlauf hat sich inzwischen geändert. Steht oben noch „Angaben zuordnen“, bitte dort neu zuordnen.'); return; }
+      const cur = S.bikes[b.id]; if (!cur) return;
+      const keys = new Set(Object.keys(res.pick)), pick = res.pick;
+      const patch = {};
+      if ([...keys].some(k => k.startsWith('item:'))) patch.items = (cur.items || []).map(it => keys.has('item:' + it.id) ? Object.assign({}, it, {lastC: pick['item:' + it.id]}) : it);
+      if (keys.has('tire:front') || keys.has('tire:rear')) {
+        const t = cur.tires || {};
+        patch.tires = {front: keys.has('tire:front') ? Object.assign({}, t.front, {c: pick['tire:front']}) : t.front, rear: keys.has('tire:rear') ? Object.assign({}, t.rear, {c: pick['tire:rear']}) : t.rear};
+      }
+      if (keys.has('chain:chain')) patch.chain = Object.assign({}, cur.chain, {c: pick['chain:chain']});
+      const r = await flow(() => store.commitR([{coll: 'bikes', id: b.id, patch}], null, 'zuordnen', {epoch: S.epoch || '', expect: {bike: b.id, fp: res.fp}}));
+      if (r === 'ok') { toast('Zugeordnet.'); return; }
+      if (r === 'fail' && S.lastErr && S.lastErr.code === 'changed') { await store.reloadAll().catch(() => {}); msg = SEG_SAVE_CHANGED; continue; }
+      toast(r === 'fail' ? errText(S.lastErr) + ' Es wurde nichts gespeichert.' : 'Unklar, ob gespeichert wurde. Sieh oben nach, ob „Angaben zuordnen“ noch da ist.');
+      return;
     }
-    if (still.has('chain:chain')) patch.chain = Object.assign({}, cur.chain, {c: pick['chain:chain']});
-    if (await bikeUpdate(b.id, patch)) toast('Zugeordnet.');
   } finally { segBusy = false; }
 }
 
@@ -761,18 +768,26 @@ async function saveTC(b){
   if (!o.payload) {
     derive();
     const ask = [];
+    /* Dieselbe Montage = gleiches Reifenmodell bzw. gleiche Kette und gleiches Datum. Nur dann behält sie ihre Stelle, auch
+       wenn der Stand berichtigt wird. Ein neues Modell ist eine neue Montage, selbst bei zufällig gleichem Stand und Datum:
+       Nach einem Zählerwechsel beweisen gleiche Zahlen nicht denselben Vorgang. */
+    const ident = {front: x => x.model || '', rear: x => x.model || '', chain: x => x.brand || ''};
+    o.segFp = null;
     for (const [ch, x, prev, key, lbl] of [[fChanged, nf, tf, 'front', 'Reifen vorn'], [rChanged, nr, tr, 'rear', 'Reifen hinten'], [cChanged, nc, c, 'chain', 'Kette']]) {
-      const same = sm(x.at, prev.at) && (x.date || '') === (prev.date || '');
       if (x.at == null || !x.date) continue;
-      if (same && prev.c != null) { x.c = prev.c; continue; }
-      if (same) continue;
-      if (auto.has(x) || !meterSegments(b, x.date).length) { x.c = o.created; continue; }
+      if (auto.has(x)) { x.c = o.created; continue; }
+      const sameMount = ident[key](x) === ident[key](prev) && (x.date || '') === (prev.date || '');
+      if (sameMount && prev.c != null) { x.c = prev.c; continue; }
+      if (sameMount && sm(x.at, prev.at)) continue;
+      if (!meterSegments(b, x.date).length) { x.c = o.created; continue; }
       ask.push({key, label: lbl + ' montiert bei ' + fmt(x.at, 2) + ' ' + U(b), date: x.date, x});
     }
     if (ask.length) {
-      const pick = await askSegments(b, ask);
-      if (!pick) return false;
-      ask.forEach(a => { a.x.c = pick[a.key]; });
+      const res = await askSegments(b, ask);
+      if (!res) return false;
+      if (res.stale) { toast('Der Zählerverlauf hat sich inzwischen geändert. Bitte noch einmal speichern.'); return false; }
+      ask.forEach(a => { a.x.c = res.pick[a.key]; });
+      o.segFp = res.fp;
     }
   }
   /* Auffällig hoher Montage-Stand? Nur geänderte Werte, verglichen mit dem Stand am Montagedatum */
@@ -788,8 +803,15 @@ async function saveTC(b){
     if (cChanged) items.push({coll: 'log', id: 'tc' + uid(), data: canonDoc('log', Object.assign({}, base, {kind: 'chain', date: nc.date, at: nc.at, title: 'Kette/Übersetzung: ' + [nc.front && nc.rear ? nc.front + '/' + nc.rear : '', nc.brand, nc.links ? nc.links + ' Glieder' : ''].filter(Boolean).join(', '), created: now + 2}))});
     o.payload = {items}; o.label = 'Reifen & Kette';
   }
-  const r = await execOp('tcForm', o, () => store.commitR(o.payload.items, null, 'tc', {epoch: o.epoch}));
+  /* Mit Zählerauswahl: der Speicher prüft, dass der Stand des Motorrads noch der ist, auf dem die Auswahl beruht.
+     Nach unklarem Ergebnis erst nachsehen, ob es schon gespeichert ist (die Prüfung würde sonst am eigenen Eintrag scheitern). */
+  if (o.segFp && o.state === 'unclear' && o.payload.items.every(it => it.patch ? subOf(it.patch, S.bikes[it.id] || {}) : S.log.some(l => l.id === it.id))) {
+    delete S.ops.tcForm; toast('Gespeichert.'); return true;
+  }
+  o.quietFail = !!o.segFp;
+  const r = await execOp('tcForm', o, () => store.commitR(o.payload.items, null, 'tc', {epoch: o.epoch, expect: o.segFp ? {bike: b.id, fp: o.segFp} : null}));
   if (r === 'ok') { toast(o.payload.items.length > 1 ? 'Gespeichert, Wechsel im Logbuch eingetragen.' : 'Gespeichert.'); return true; }
+  if (r === 'fail' && o.quietFail) toast(S.lastErr && S.lastErr.code === 'changed' ? SEG_SAVE_CHANGED.replace('Bitte neu wählen.', 'Tipp noch einmal auf „Speichern“, dann fragt Racebook neu.') : errText(S.lastErr) + ' Es wurde nichts gespeichert.');
   return false;
 }
 async function saveOil(b){
@@ -821,18 +843,22 @@ async function saveInt(b){
      späterer Zählerwechsel am selben Tag ihn nicht dem neuen Zähler zuschlägt. Am Tag eines Zählerwechsels wird gefragt. */
   derive();
   const now = Date.now(), ask = [];
+  let segFp = null;
   for (const it of items) {
     const prev = old.find(x => x.id === it.id);
     if (it.lastAt == null || !it.lastDate) continue;
-    const same = prev && prev.lastAt === it.lastAt && (prev.lastDate || null) === it.lastDate;
-    if (same) { if (prev.lastC != null) it.lastC = prev.lastC; continue; }
+    /* Derselbe Wartungspunkt am selben Startdatum: Berichtigung des Werts, die Stelle bleibt (falls schon bekannt) */
+    if (prev && (prev.lastDate || null) === it.lastDate && prev.lastC != null) { it.lastC = prev.lastC; continue; }
+    if (prev && prev.lastAt === it.lastAt && (prev.lastDate || null) === it.lastDate) continue;
     if (!meterSegments(b, it.lastDate).length) { it.lastC = now; continue; }
     ask.push({key: it.id, label: 'Startwert ' + it.name + ': ' + fmt(it.lastAt, 2) + ' ' + U(b), date: it.lastDate, it});
   }
   if (ask.length) {
-    const pick = await askSegments(b, ask);
-    if (!pick) return false;
-    ask.forEach(a => { a.it.lastC = pick[a.key]; });
+    const res = await askSegments(b, ask);
+    if (!res) return false;
+    if (res.stale) { toast('Der Zählerverlauf hat sich inzwischen geändert. Bitte noch einmal speichern.'); return false; }
+    ask.forEach(a => { a.it.lastC = res.pick[a.key]; });
+    segFp = res.fp;
   }
   /* Geänderter Startwert deutlich über dem Stand am Startdatum (ohne Datum: heute)? Verglichen mit dem Zähler, der gemeint ist */
   for (const it of items) {
@@ -841,6 +867,14 @@ async function saveInt(b){
     const el = $$('#intRows tr').find(tr => tr.dataset.id === it.id);
     const cmp = it.lastDate ? posAt(b.id, it.lastDate, it.lastC != null ? it.lastC : Infinity).disp : curOf(b);
     if (!(await jumpOk(null, b, it.lastDate || todayISO(), it.lastAt, el ? $('[data-k="lastAt"]', el) : null, cmp))) return false;
+  }
+  if (segFp) {
+    /* Mit Zählerauswahl: nur speichern, wenn der Stand des Motorrads noch der ist, auf dem die Auswahl beruht */
+    const r = await flow(() => store.commitR([{coll: 'bikes', id: b.id, patch: {items, unit}}], null, 'intervalle', {epoch: S.epoch || '', expect: {bike: b.id, fp: segFp}}));
+    if (r === 'ok') { toast('Gespeichert.'); return true; }
+    if (r === 'fail' && S.lastErr && S.lastErr.code === 'changed') { await store.reloadAll().catch(() => {}); toast(SEG_SAVE_CHANGED.replace('Bitte neu wählen.', 'Tipp noch einmal auf „Speichern“, dann fragt Racebook neu.')); return false; }
+    toast(r === 'fail' ? errText(S.lastErr) + ' Es wurde nichts gespeichert.' : 'Unklar, ob gespeichert wurde. Tipp noch einmal auf „Speichern“.');
+    return false;
   }
   if (await bikeUpdate(b.id, {items, unit})) { toast('Gespeichert.'); return true; }
   return false;

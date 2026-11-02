@@ -1,4 +1,4 @@
-# Racebook – eigenständige App (PWA), Version 1.1.1
+# Racebook – eigenständige App (PWA), Version 1.1.2
 
 Racebook ist ein Wartungsheft für Motorräder: Wartung und Fälligkeiten, Logbuch, Fahrten, Fahrwerk-Setups, Teilevorrat, Mängel, Fotos und Bedienungsanleitung. Diese Fassung läuft als installierbare Web-App (PWA) im Browser, speichert alles **nur auf dem Gerät** (IndexedDB) und funktioniert nach dem ersten Laden auch ohne Netz.
 
@@ -97,7 +97,7 @@ Ist eine neue Version veröffentlicht, lädt die App sie im Hintergrund und zeig
 
 ### Für die Veröffentlichung einer neuen Version
 1. Dateien ändern.
-2. In `sw.js` die Konstante `VERSION` erhöhen (z. B. `racebook-1.1.1`) und in `js/backup.js` `APP_VERSION` anpassen. Ohne neue `VERSION` bekommen installierte Apps die Änderungen nicht.
+2. In `sw.js` die Konstante `VERSION` erhöhen (z. B. `racebook-1.1.2`) und in `js/backup.js` `APP_VERSION` anpassen. Ohne neue `VERSION` bekommen installierte Apps die Änderungen nicht.
 3. Neue Dateien auf dieselbe Adresse hochladen.
 4. Ändert sich das Speicherformat: in `js/db.js` `DB_VERSION` erhöhen und **hinten** an `MIGRATIONS` einen neuen Schritt anhängen. Bestehende Schritte nie ändern oder löschen. Jeder Schritt läuft in derselben Transaktion; bei einem Fehler bricht der Browser alles ab. Aktuell ist `DB_VERSION` 3 (Schritt 3 legt die Bestandskennung an). Noch offene Fenster einer älteren Version werden beim Hochziehen vom Browser getrennt und melden „in einem anderen Fenster aktualisiert“; sie können danach nichts mehr schreiben.
 5. Ändert sich das Sicherungsformat: `ZIP_VERSION` in `js/domain.js` erhöhen und ältere Versionen beim Einspielen weiter lesen können. Die höhere Version nur schreiben, wenn die neuen Angaben wirklich vorkommen (so liest eine ältere App-Version Sicherungen ohne sie weiter).
@@ -131,7 +131,7 @@ js/zip.js             ZIP schreiben und lesen (ohne fremde Bibliothek)
 js/backup.js          Sicherung, Einspielen, Übernahme der bisherigen Version
 js/views/*.js         Ansichten: Übersicht, Motorrad, Mängel, Daten & Sicherung; counter.js: Rückfrage bei Sprüngen,
                       Tippfehler berichtigen (Vorschau), Zählerwechsel
-tests/                automatische Tests: nicht im App-ZIP, sondern im Test-ZIP racebook-pwa-tests-1.1.1.zip,
+tests/                automatische Tests: nicht im App-ZIP, sondern im Test-ZIP racebook-pwa-tests-1.1.2.zip,
                       das sich in denselben Ordner entpackt (siehe tests/README.md)
 ```
 
@@ -182,6 +182,8 @@ Im Zweifel wird also nichts als erledigt eingetragen. War es doch erledigt, übe
 - **Wartungsstand prüfen:** Liegt die letzte Wartung eines Punkts über dem heutigen Stand (z. B. weil ein Tippfehler schon als Korrektur gespeichert wurde), zeigt Racebook „Wartungsstand prüfen“ statt einer Restlaufzeit. Lässt sich der Widerspruch als Tippfehler berichtigen, steht oben „Prüfen“ und öffnet dieselbe Vorschau.
 - **Zählerwechsel:** Technik → Stundenzähler (bei km-Motorrädern Kilometerzähler) → „Stundenzähler ersetzt“: Datum, letzter Stand des alten Zählers (leer = berechneter Stand) und Anzeige des neuen. Danach trägst du ein, was der neue Zähler anzeigt. Das Schild zeigt die Zähleranzeige, darunter die Gesamtlaufleistung; Fälligkeiten rechnen mit der Gesamtlaufleistung. Beispiel: gesamt 54 h, neuer Zähler 0 h, später Anzeige 3 h → gesamt 57 h; Wartung bei 50 h mit 50-h-Intervall → noch 43 h. Der Wechsel steht im Logbuch und lässt sich dort löschen.
 - **Am Tag eines Zählerwechsels (ab 1.1.1):** Startwerte (Technik → Intervalle) und Montagen (Reifen & Kette) gelten wie Logbuch-Einträge in der Reihenfolge, in der sie eingetragen wurden. Ein Startwert, der vor dem Wechsel am selben Tag eingetragen wurde, gehört also zum alten Zähler, auch nach weiteren Wechseln. Trägst du einen Wert für einen Tag ein, an dem schon ein Zähler gewechselt wurde, fragt Racebook „Welcher Zähler war gemeint?“ (alter, gegebenenfalls zwischenzeitlicher oder neuer Zähler); nichts ist vorausgewählt. Angaben aus 1.1.0 und älter, bei denen das nicht feststeht, zeigen „Wartungsstand prüfen“ bzw. „Zähler unklar“; oben steht „Angaben zuordnen“ mit derselben Auswahl. Liegt eine Montage über dem heutigen Gesamtstand, steht „Montagestand prüfen“ statt „0 h gelaufen“.
+- **Neue Montage oder Berichtigung (ab 1.1.2):** Ein neues Reifenmodell bzw. eine neue Kette ist eine neue Montage, auch wenn Stand und Datum zufällig gleich sind wie bei der alten; am Tag eines Zählerwechsels fragt Racebook dann, welcher Zähler gemeint ist (bei leerem Stand nimmt es die aktuelle Anzeige, ohne zu fragen). Wird nur der Stand derselben Montage oder desselben Startwerts am selben Datum berichtigt, bleibt die bisherige Zuordnung.
+- **Auswahl bleibt nur auf ihrem Stand gültig (ab 1.1.2):** Ändern sich die Daten des Motorrads, während „Welcher Zähler war gemeint?“ offen ist (etwa in einem anderen Fenster), berechnet Racebook die Auswahl neu, setzt sie zurück und fragt mit Hinweis erneut. Gespeichert wird nur, wenn der Speicher bestätigt, dass sich seit der Auswahl nichts geändert hat; sonst wird nichts gespeichert und neu gefragt.
 
 ## 10. Mehrere Fenster
 

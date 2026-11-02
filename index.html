@@ -306,7 +306,7 @@
       <p><b>Stand:</b> Ein abgelesener Stand gilt immer, auch wenn er schon mit dem berechneten übereinstimmt. Fahrten werden nach ihrem Datum einsortiert: Eine nachgetragene Fahrt von gestern steckt also schon in einem heute abgelesenen Stand. Bei einer Fahrt vom selben Tag kannst du ankreuzen, ob sie schon im abgelesenen Stand enthalten ist.</p>
       <p><b>Vertippt?</b> Liegt ein neuer Stand mehr als 20 h bzw. 2.000 km über dem bisherigen, fragt Racebook nach („Eingabe korrigieren“ oder „Stimmt so“). Ist ein neuer Stand niedriger, kannst du mit „Tippfehler berichtigen …“ die falsche Ablesung selbst richtigstellen. Vorher zeigt Racebook alle betroffenen Einträge und was sich bei den Fälligkeiten ändert. Von dir eingetippte Werte ändert es nur, wenn du „berichtigen“ wählst.</p>
       <p><b>Wartungsstand prüfen:</b> Steht die letzte Wartung bei mehr als dem heutigen Stand, zeigt Racebook keine Restzeit, sondern „Wartungsstand prüfen“. Oben über „Prüfen“ lässt sich das meist direkt berichtigen.</p>
-      <p><b>Neuer Zähler:</b> Wurde der Stundenzähler (Kilometerzähler) getauscht, trag das unter Technik → Stundenzähler ein. Danach zeigt das Schild, was der neue Zähler anzeigt, darunter die Gesamtlaufleistung. Fälligkeiten rechnen mit der Gesamtlaufleistung. Startwerte und Montagen vom selben Tag gelten in der Reihenfolge, in der du sie eingetragen hast. Trägst du einen solchen Wert erst nach dem Wechsel für diesen Tag ein, fragt Racebook, welcher Zähler gemeint war.</p>
+      <p><b>Neuer Zähler:</b> Wurde der Stundenzähler (Kilometerzähler) getauscht, trag das unter Technik → Stundenzähler ein. Danach zeigt das Schild, was der neue Zähler anzeigt, darunter die Gesamtlaufleistung. Fälligkeiten rechnen mit der Gesamtlaufleistung. Startwerte und Montagen vom selben Tag gelten in der Reihenfolge, in der du sie eingetragen hast. Trägst du einen solchen Wert erst nach dem Wechsel für diesen Tag ein, fragt Racebook, welcher Zähler gemeint war. Ein neues Reifenmodell oder eine neue Kette gilt dabei als neue Montage, auch bei gleichem Stand; berichtigst du nur den Stand derselben Montage, bleibt ihr Zähler.</p>
       <p><b>Wartung ohne Stand:</b> Lässt du den Stand leer, ergibt er sich aus dem Verlauf und passt sich an, wenn du zum Beispiel eine frühere Fahrt löschst.</p>
       <p><b>Stand unbekannt:</b> Fehlt für einen Wartungspunkt der Stand oder das Datum der letzten Arbeit, zeigt Racebook „Stand unbekannt“ statt einer Restzeit. Trag die letzte Arbeit über „Erledigt“ ein.</p>
       <p><b>Löschen:</b> Wenn du eine Wartung oder Fahrt löschst, rechnet die App Fälligkeit und Stand neu, als hätte es sie nie gegeben. Ein später abgelesener Stand bleibt dabei gültig.</p>
@@ -354,6 +354,7 @@
 <dialog id="segDlg" class="sheet fix-sheet" aria-labelledby="segTitle">
   <h2 id="segTitle" tabindex="-1">Welcher Zähler war gemeint?</h2>
   <div id="segBody" class="fix-body"></div>
+  <p class="warnbox" id="segMsg" role="alert" hidden></p>
   <p class="hint" id="segNeed">Bitte bei jeder Angabe einen Zähler wählen.</p>
   <div class="row"><button class="btn primary" type="button" id="segOk" disabled>Übernehmen</button><button class="btn ghost" type="button" id="segCancel">Abbrechen</button></div>
 </dialog>
