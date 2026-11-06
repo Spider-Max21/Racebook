@@ -96,6 +96,14 @@ export function hydrate(root){
 
 /* ---------- Symbole (Linien, 24er Raster) ---------- */
 const P = {
+  home: '<path d="M3 10l9-7 9 7M5 9v12h14V9M8 21V12h8v9M8 15h8M8 18h8"/>',
+  inventory: '<path d="M3 7l9-4 9 4-9 4zM3 7v11l9 4 9-4V7M12 11v11M7 5l10 4"/>',
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  components: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v5M12 15v5M4 12h5M15 12h5"/>',
+  vehicle: '<path d="M5 3h10l4 4v14H5zM15 3v5h4M8 12h8M8 16h8"/>',
+  specs: '<path d="M6 3v18M3 7h6M3 12h6M3 17h6M14 4h6v16h-6zM14 9h6M14 15h6"/>',
+  maintenance: '<path d="M5 5h14v16H5zM9 3v4M15 3v4M8 11h8M8 15h5"/>',
+
   back: '<path d="M15 5l-7 7 7 7"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   status: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3.5 17.3a1.8 1.8 0 0 0 2.5 2.6l5.8-5.8a4 4 0 0 0 5.2-5.4l-2.4 2.4-2.3-.6-.6-2.3z"/>',
@@ -119,16 +127,21 @@ const P = {
   wrench: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3.5 17.3a1.8 1.8 0 0 0 2.5 2.6l5.8-5.8a4 4 0 0 0 5.2-5.4l-2.4 2.4-2.3-.6-.6-2.3z"/>',
   flag: '<path d="M5 21V4M5 4h12l-2 4 2 4H5"/>',
   data: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
-  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7"/><path d="M12 17h.01"/>'
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7"/><path d="M12 17h.01"/>',
+  sort: '<path d="M8 4v16M4 8l4-4 4 4M16 20V4M12 16l4 4 4-4"/>',
+  grip: '<path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3"/>'
 };
 export const icon = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (P[n] || '') + '</svg>';
 
 /* ---------- Navigation ---------- */
-export const SECTIONS = [['status', 'Status'], ['defects', 'Mängel'], ['log', 'Logbuch', 'Logbuch', 'Log'], ['rides', 'Fahrten'], ['setup', 'Setup', 'Fahrwerk-Setups'], ['garage', 'Technik'], ['manual', 'Handbuch', 'Handbuch', 'Handb.']];
+export const SECTIONS = [['status', 'Übersicht'], ['defects', 'Mängel'], ['log', 'Logbuch'], ['rides', 'Fahrten'], ['setup', 'Setup'], ['components', 'Verbaute Teile'], ['vehicle', 'Fahrzeugdaten'], ['specs', 'Technische Daten'], ['maintenance', 'Wartungsintervalle'], ['manual', 'Handbuch']];
 export function parseRoute(h){
   h = String(h == null ? location.hash : h).replace(/^#/, '');
   const p = h.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch (e) { return ''; } });
-  if (p[0] === 'bike' && p[1]) return {page: 'bike', bike: p[1], section: SECTIONS.some(s => s[0] === p[2]) ? p[2] : 'status'};
+  if (p[0] === 'bike' && p[1]) return {page: 'bike', bike: p[1], section: p[2] === 'garage' ? 'vehicle' : SECTIONS.some(s => s[0] === p[2]) ? p[2] : 'status'};
+  if (p[0] === 'lager') return {page: 'inventory'};
+  if (p[0] === 'menue') return {page: 'navigation'};
+  if (p[0] === 'einstellungen') return {page: 'data'};
   if (p[0] === 'daten') return {page: 'data'};
   if (p[0] === 'hilfe') return {page: 'help'};
   if (p[0] === 'neu') return {page: 'add'};
@@ -136,7 +149,9 @@ export function parseRoute(h){
 }
 export function routeHash(r){
   if (r.page === 'bike') return '#/bike/' + encodeURIComponent(r.bike) + '/' + (r.section || 'status');
-  if (r.page === 'data') return '#/daten';
+  if (r.page === 'inventory') return '#/lager';
+  if (r.page === 'navigation') return '#/menue';
+  if (r.page === 'data') return '#/einstellungen';
   if (r.page === 'help') return '#/hilfe';
   if (r.page === 'add') return '#/neu';
   return '#/';

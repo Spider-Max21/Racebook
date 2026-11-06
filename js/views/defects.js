@@ -6,7 +6,8 @@
    Erledigen mit Reparatur ist EIN Vorgang: Mangel und Logbuch-Eintrag werden gemeinsam gespeichert.
    Die ID des Logbuch-Eintrags ergibt sich aus Mangel und Reparaturnummer, eine Wiederholung erzeugt
    deshalb nie einen zweiten Eintrag. */
-import {esc, str, fmt, eur, todayISO, fmtDate, v2} from '../util.js';
+import {esc, str, fmt, eur, todayISO, fmtDate, v2, canon, clone} from '../util.js';
+import * as drafts from '../drafts.js';
 import {S, U} from '../state.js';
 import {DEFECT_PRIOS, DEFECT_STATES, LIM, MAX_COST, serviceDoc, curOf, canonDoc} from '../domain.js';
 import * as store from '../store.js';
@@ -81,7 +82,8 @@ function renderKeep(){
 export function openDefectForm(){ const d = $('#defectDetails'); if (d) d.open = true; setTimeout(() => { const t = $('#dTitle'); if (t) t.focus(); }, 50); }
 /* Nur den Bearbeiten-/Erfassen-Entwurf zurücksetzen; ein offener Erledigt-Entwurf bleibt */
 export function resetDefectEdit(){
-  S.defEdit = null; S.defKeep = null;
+  S.defEdit = null; S.defKeep = null; S.defEditBase = null;
+  const cf = $('#dConflict'); if (cf) { cf.hidden = true; cf.textContent = ''; }
   const f = $('#defectForm'); if (f) { f.reset(); f.dataset.bike = S.bike; f.dataset.epoch = S.epoch || ''; }
   const dd = $('#dDate'); if (dd) { dd.value = todayISO(); dd.max = todayISO(); }
   const t = $('#defFormTitle'); if (t) t.textContent = 'Mangel erfassen';
@@ -97,7 +99,7 @@ export function closeDefectDraft(k){
   if (k === 'defectForm') resetDefectEdit();
   else if (k === 'defDoneForm') resetDefectDone();
 }
-function editDefect(d){
+function editDefect(d, raw){
   /* Neuer Bearbeiten-Entwurf = neue Generation: ein laufender Vorgang zu einem anderen Mangel endet für
      seinen eigenen Mangel und schließt diesen Entwurf nicht. Ein ungeklärter Vorgang zu einem anderen Mangel
      wird getrennt weiter abgeglichen, einer zum selben Mangel an den neuen Entwurf gebunden. */
@@ -111,8 +113,21 @@ function editDefect(d){
   $('#defFormTitle').textContent = 'Mangel bearbeiten'; $('#dCancel').hidden = false;
   $('#defectForm').dataset.bike = d.bike;
   $('#defectDetails').open = true;
+  /* Grundlage des Entwurfs: gespeicherte Felder beim Öffnen (Schutz vor Überschreiben aus einem anderen Fenster).
+     Ab 1.3.2 aus demselben Datensatz wie die Formularfelder (d), nie aus einem anderen Stand. */
+  S.defEditBase = pickDef(raw || d);
   renderKeep();
+  drafts.mark('defect');
   setSection('defects', 'defectDetails');
+}
+const DEF_FIELDS = ['title', 'description', 'date', 'priority', 'photos'];
+const pickDef = raw => { const o = {}; DEF_FIELDS.forEach(f => { o[f] = clone(raw[f] === undefined ? null : raw[f]); }); return o; };
+export function registerDefectDrafts(){
+  drafts.register({key: 'defect', label: 'Mangel', root: () => $('#defectForm'), extra: () => [S.defEdit || '', S.defKeep ? Array.from(S.defKeep).sort() : null], isOpen: () => $('#defectDetails').open,
+    save: async () => R.submitForm($('#defectForm')), discard: () => { parkOp('defectForm'); R.closeDraft('defectForm'); },
+    reveal: () => { $('#defectDetails').open = true; setSection('defects', 'defectDetails'); }});
+  drafts.register({key: 'defDone', label: 'Mangel erledigen', root: () => $('#defDoneForm'), isOpen: () => !!S.defDone, save: async () => { const f = $('#defDoneForm'); return f ? R.submitForm(f) : true; },
+    discard: () => { parkOp('defDoneForm'); R.closeDraft('defDoneForm'); renderDefects(); }, reveal: () => setSection('defects')});
 }
 
 async function saveDefect(f, busy){
@@ -143,20 +158,45 @@ async function saveDefect(f, busy){
       const fields = {title, description: desc, date, priority: prio, photos: keep.concat(made.map(m => m.photo))};
       if (editing) {
         /* Nur die bearbeiteten Felder ändern (in gespeicherter Form); Status, Erledigt-Datum und Reparaturen
-           bleiben so, wie sie gespeichert sind, auch wenn sie sich inzwischen geändert haben */
+           bleiben so, wie sie gespeichert sind, auch wenn sie sich inzwischen geändert haben. Ab 1.2.0 nur, wenn diese Felder
+           im Speicher noch dem Stand beim Öffnen entsprechen (guard): keine stille Überschreibung aus einem älteren Entwurf. */
         const full = canonDoc('defects', Object.assign(without(editing), fields));
         o.payload = {title: full.title, description: full.description, date: full.date, priority: full.priority, photos: full.photos};
+        o.guard = S.defEditBase ? clone(S.defEditBase) : null;
       } else o.payload = canonDoc('defects', Object.assign({status: 'open', doneDate: null, repairs: 0, repairLogId: '', created: o.created, bike: b.id}, fields));
       o.removed = editing ? payloadFiles(editing).filter(id => !payloadFiles(o.payload).includes(id)) : [];
       o.label = 'Mangel ' + title;
     }
-    return editing ? store.sUpdateR('defects', o.op, o.payload, o.files, {epoch: o.epoch}) : store.sSetR('defects', o.op, o.payload, o.files, {epoch: o.epoch});
+    return editing ? store.commitR([{coll: 'defects', id: o.op, patch: o.payload, guard: o.guard || undefined}], o.files, 'defect-edit', {epoch: o.epoch}) : store.sSetR('defects', o.op, o.payload, o.files, {epoch: o.epoch});
   });
+  if (r === 'fail' && editing && S.lastErr && (S.lastErr.code === 'changed' || S.lastErr.code === 'not_found')) {
+    await store.reloadAll().catch(() => {});
+    rebaseDefect(editing.id, {title, description: desc, date, priority: prio});
+    return;
+  }
   if (r === 'ok') {
     if (o.removed && o.removed.length) cleanupFiles(o.removed);
     if ((S.gen.defectForm || 0) === g) R.closeDraft('defectForm');
     toast(editing ? 'Mangel geändert.' : 'Mangel gespeichert.');
   }
+}
+
+/* Mangel wurde inzwischen anderswo geändert oder gelöscht: eigene Änderungen auf den aktuellen Stand übertragen, Konflikte nennen */
+function rebaseDefect(id, mine){
+  const cf = $('#dConflict'), raw = store.peek('defects', id), base = S.defEditBase || {};
+  if (!raw) { cf.textContent = 'Dieser Mangel wurde inzwischen in einem anderen Fenster gelöscht. Es wurde nichts gespeichert. Tipp auf „Abbrechen“, um das Formular zu schließen.'; cf.hidden = false; return; }
+  const names = {title: 'Titel', description: 'Beschreibung', date: 'Festgestellt am', priority: 'Priorität'}, conflicts = [];
+  const cur = pickDef(raw), nz = v => v == null || v === '' ? null : v;
+  Object.keys(names).forEach(k => {
+    const m = nz(mine[k]), b0 = nz(base[k]), c = nz(cur[k]);
+    if (canon(m) === canon(b0)) { if ($('#' + {title: 'dTitle', description: 'dDesc', date: 'dDate', priority: 'dPrio'}[k])) $('#' + {title: 'dTitle', description: 'dDesc', date: 'dDate', priority: 'dPrio'}[k]).value = cur[k] || (k === 'priority' ? 'mid' : ''); return; }
+    if (canon(c) !== canon(b0) && canon(c) !== canon(m)) conflicts.push(names[k] + ': dort „' + (cur[k] || '') + '“, bei dir „' + (mine[k] || '') + '“');
+  });
+  S.defEditBase = cur;
+  if (canon(cur.photos) !== canon(base.photos)) { S.defKeep = new Set((cur.photos || []).map(p => p.id)); renderKeep(); conflicts.push('Fotos wurden dort geändert, bitte prüfen'); }
+  cf.textContent = 'Diese Daten wurden inzwischen in einem anderen Fenster geändert. Es wurde nichts gespeichert. Bitte prüfe den aktuellen Stand.' + (conflicts.length ? ' Unterschiedlich geändert: ' + conflicts.join('; ') + '. Im Formular steht deine Eingabe.' : ' Deine Änderungen sind in den aktuellen Stand übernommen.') + ' Tipp erneut auf „Mangel speichern“.';
+  cf.hidden = false; cf.scrollIntoView({block: 'center'});
+  toast('Diese Daten wurden inzwischen in einem anderen Fenster geändert. Es wurde nichts gespeichert. Bitte prüfe den aktuellen Stand.');
 }
 
 async function saveDefectDone(f, busy){
@@ -200,9 +240,19 @@ async function saveDefectDone(f, busy){
 }
 
 export async function onClick(t){
-  if (t.dataset.defedit) { const d = S.defects.find(x => x.id === t.dataset.defedit); if (d) editDefect(d); return true; }
+  /* Ab 1.3.2: Mangel erst nach der Rückfrage über seine Kennung auflösen (siehe editDefect) */
+  if (t.dataset.defedit) {
+    const id = t.dataset.defedit; if (!S.defects.some(x => x.id === id)) return true;
+    drafts.begin(() => {
+      const d = S.defects.find(x => x.id === id), raw = store.peek('defects', id);
+      if (!d || !raw) { toast('Diesen Mangel gibt es inzwischen nicht mehr.'); return; }
+      editDefect(Object.assign({}, d, clone(raw), {id}), raw);
+    });
+    return true;
+  }
   if (t.id === 'dCancel') { if (S.ops.defectForm && S.ops.defectForm.saving) return true; parkOp('defectForm'); R.closeDraft('defectForm'); return true; }
   if (t.dataset.defdone) {
+    if (!(await drafts.begin(() => {}))) return true;
     const so = S.ops.defDoneForm, id = t.dataset.defdone;
     /* Wie bei Wartungspunkten: neuer Entwurf = neue Generation; ein ungeklärter Vorgang zu einem
        anderen Mangel wird getrennt weiter abgeglichen, zum selben Mangel an den Entwurf gebunden */
@@ -211,6 +261,7 @@ export async function onClick(t){
     if (S.ops.defDoneForm && !S.ops.defDoneForm.saving && S.ops.defDoneForm.item === id) S.ops.defDoneForm.gen = S.gen.defDoneForm;
     S.defDone = id; S.defDoneDraft = {date: todayISO(), log: false, atStr: '', costStr: '', noteStr: ''};
     renderDefects();
+    drafts.mark('defDone');
     const el = $('#ddDate'); if (el) el.focus();
     return true;
   }

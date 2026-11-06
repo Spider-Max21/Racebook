@@ -200,7 +200,8 @@ async function adjustR(id, op, spec, ep){
   const check = async () => { const n = await askApplied(op, id); return n.state !== 'known' ? 'unclear' : n.applied ? 'ok' : 'fail'; };
   const f = failOf('update', path);
   if (f && !f.after) { S.lastErr = {code: 'unavailable'}; return check(); }
-  const ops = [{store: coll, type: 'adjust', id, op, add: Math.round(Number(spec.add) || 0), low: !!spec.low, set: spec.set && Object.keys(spec.set).length ? clone(spec.set) : null}];
+  const ops = [{store: coll, type: 'adjust', id, op, add: Math.round(Number(spec.add) || 0), low: !!spec.low, set: spec.set && Object.keys(spec.set).length ? clone(spec.set) : null,
+    guard: spec.guard && Object.keys(spec.guard).length ? clone(spec.guard) : null}];
   const r = await run(ops, (late, res) => {
     applied.add(op);
     ((res && res.adjusted) || []).forEach(x => { if (x.doc) L[coll][x.id] = strip(x.doc); mirror(coll, x.id); });
@@ -249,7 +250,8 @@ async function delR(coll, id, ep){
 
 /* Mehrere Einträge in einem Vorgang (z. B. Mangel erledigt + Reparatur im Logbuch, Motorrad mit
    allen Einträgen entfernen).
-   items: [{coll, id, data} | {coll, id, patch} | {coll, id, del: true} | {coll: 'bikes', id, delBike: true}]
+   items: [{coll, id, data} | {coll, id, patch, guard?} | {coll, id, del: true} | {coll: 'bikes', id, delBike: true}]
+     guard (ab 1.2.0): {Feld: Wert, auf dem der Entwurf beruht} – der Speicher schreibt nur, wenn diese Felder noch gleich sind
    opts.epoch: Bestandskennung des Vorgangs; opts.out: erhält removed (tatsächlich entfernte Einträge) */
 export function commitR(items, files, label, opts){
   const ep = epochArg(opts);
@@ -284,7 +286,7 @@ async function commitRun(items, files, label, ep, out, expect){
   const ops = (files || []).map(x => ({store: 'files', type: 'put', value: x})).concat(items.map(it =>
     it.delBike ? {store: 'bikes', type: 'delBike', id: it.id}
       : it.del ? {store: it.coll, type: 'del', id: it.id}
-      : it.patch ? {store: it.coll, type: 'patch', id: it.id, patch: clone(it.patch)}
+      : it.patch ? Object.assign({store: it.coll, type: 'patch', id: it.id, patch: clone(it.patch)}, it.guard ? {guard: clone(it.guard)} : {})
       : {store: it.coll, type: 'put', value: Object.assign(clone(it.data), {id: it.id})}));
   const touched = new Set(items.map(it => it.coll));
   if (items.some(it => it.delBike)) COLLS.forEach(c => touched.add(c));

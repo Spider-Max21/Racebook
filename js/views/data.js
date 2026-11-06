@@ -47,18 +47,19 @@ function backupStatus(){
 function previewHTML(d){
   const cur = {}; COLLS.forEach(k => { cur[k] = k === 'bikes' ? bikeList().length : S[k].length; });
   const fileSize = (d.files || []).reduce((a, f) => a + (f.size || 0), 0);
-  const empty = !d.counts.bikes;
+  const empty = !d.counts.bikes && !d.counts.parts && !d.navigation;
   return '<div class="preview" id="importPreview"><h3>Sicherung prüfen</h3><dl class="kv">'
     + '<dt>Quelle</dt><dd>' + esc(SRC[d.source] || 'Sicherung') + '</dd>'
     + (d.fileName ? '<dt>Datei</dt><dd>' + esc(d.fileName) + '</dd>' : '')
     + (d.exported ? '<dt>Erstellt</dt><dd>' + esc(fmtWhen(Date.parse(d.exported))) + '</dd>' : '')
     + '<dt>Inhalt</dt><dd>' + esc(countText(d.counts)) + '</dd>'
     + '<dt>Motorräder</dt><dd>' + (d.bikes.length ? esc(d.bikes.join('; ')) : '–') + '</dd>'
+    + '<dt>Menü</dt><dd>' + (d.navigation ? 'Persönliche Belegung wird übernommen' : 'Standardbelegung') + '</dd>'
     + '<dt>Dateien</dt><dd>' + (d.files || []).length + (fileSize ? ' (' + fmtSize(fileSize) + ')' : '') + '</dd></dl>'
     + (d.orphanCount ? '<p class="warnbox"><b>' + (d.orphanCount === 1 ? 'Ein Eintrag gehört' : d.orphanCount + ' Einträge gehören') + ' zu keinem Motorrad</b> (aus einer früheren Version). Sie werden ohne Motorrad übernommen und danach hier unter „Einträge ohne Motorrad“ zum Zuordnen oder Löschen angezeigt.</p>' : '')
     + (d.missing && d.missing.length ? '<div class="warnbox"><b>Nicht übernommen werden ' + d.missing.length + ' Anhänge:</b><ul class="miss">' + d.missing.map(m => '<li>' + esc(typeof m === 'string' ? m : m.where + ': ' + m.what) + '</li>').join('') + '</ul>'
-      + (d.source === 'zip' ? 'Sie fehlten schon beim Erstellen der Sicherung.' : 'Diese Dateien liegen im Speicher der Claude-App und sind nicht in der Sicherung enthalten. Lade sie bei Bedarf hier neu hoch (Technik → Foto, Handbuch → PDF).') + '</div>' : '')
-    + (empty ? '<p class="warnbox"><b>Diese Sicherung enthält keine Motorräder.</b> Sie wird nicht eingespielt, damit deine Garage nicht geleert wird.</p>'
+      + (d.source === 'zip' ? 'Sie fehlten schon beim Erstellen der Sicherung.' : 'Diese Dateien liegen im Speicher der Claude-App und sind nicht in der Sicherung enthalten. Lade sie bei Bedarf hier neu hoch (Fahrzeugdaten → Foto, Handbuch → PDF).') + '</div>' : '')
+    + (empty ? '<p class="warnbox"><b>Diese Sicherung enthält keine Motorräder, Lagerartikel oder Menübelegung.</b> Sie wird nicht eingespielt, damit deine Garage nicht geleert wird.</p>'
       : '<p class="warnbox">Die Sicherung ersetzt alle Daten auf diesem Gerät (jetzt: ' + esc(countText(cur)) + '). ' + (cur.bikes ? 'Der jetzige Stand wird vorher als Sicherheitskopie aufbewahrt und lässt sich wiederherstellen.' : 'Die Garage auf diesem Gerät ist leer.') + '</p>')
     + '<div class="row">' + (cur.bikes && !empty ? '<button class="btn" type="button" id="exportBefore">' + icon('save') + 'Aktuellen Stand vorher herunterladen</button>' : '')
     + (empty ? '' : '<button class="btn primary" type="button" id="importDo"' + (S.importBusy ? ' disabled' : '') + '>' + (S.importBusy ? 'Wird eingespielt …' : (d.source === 'v8-local' ? 'Übernehmen' : 'Alle Daten ersetzen')) + '</button>')
@@ -118,8 +119,11 @@ function storageHTML(){
 export function renderData(){
   const el = $('#dataBody'); if (!el) return;
   if (S.mode !== 'ready') { el.innerHTML = '<p class="hint thinking">Speicher wird geladen …</p>'; return; }
-  const has = bikeList().length > 0;
+  const has = bikeList().length > 0 || S.parts.length > 0 || !!S.navigation;
   const parts = [];
+  parts.push('<section class="card"><h2>Einstellungen</h2><p class="hint">Darstellung, Menü und Sicherung für die ganze App.</p><div class="row"><button class="btn" type="button" data-nav="navigation">Menü anpassen</button><button class="btn ghost" type="button" data-settingsjump="appearanceCard">Darstellung</button><button class="btn ghost" type="button" data-settingsjump="bkCard">Daten &amp; Sicherung</button></div></section>');
+  const th = lsGet('theme') || 'system';
+  parts.push('<section class="card" id="appearanceCard"><h2>Darstellung</h2><div class="f"><label for="themeSel">Farbschema</label><select id="themeSel"><option value="system"' + (th === 'system' ? ' selected' : '') + '>wie das Gerät</option><option value="dark"' + (th === 'dark' ? ' selected' : '') + '>dunkel</option><option value="light"' + (th === 'light' ? ' selected' : '') + '>hell</option></select></div></section>');
   parts.push('<section class="card" id="bkCard"><h2>Sicherung</h2>' + backupStatus()
     + '<div class="row"><button class="btn primary" type="button" id="exportBtn"' + (allLoaded() && has && !S.exporting ? '' : ' disabled') + '>' + icon('save') + (S.exporting ? 'Wird erstellt …' : 'Sicherung herunterladen') + '</button>'
     + (navigator.canShare ? '<button class="btn" type="button" id="shareBtn"' + (allLoaded() && has && !S.exporting ? '' : ' disabled') + '>' + icon('share') + 'Sicherung teilen …</button>' : '') + '</div>'
@@ -142,8 +146,6 @@ export function renderData(){
   parts.push(orphanHTML());
   parts.push(migrationHTML());
   parts.push(storageHTML());
-  const th = lsGet('theme') || 'system';
-  parts.push('<section class="card"><h2>Darstellung</h2><div class="f"><label for="themeSel">Farbschema</label><select id="themeSel"><option value="system"' + (th === 'system' ? ' selected' : '') + '>wie das Gerät</option><option value="dark"' + (th === 'dark' ? ' selected' : '') + '>dunkel</option><option value="light"' + (th === 'light' ? ' selected' : '') + '>hell</option></select></div></section>');
   const sw = 'serviceWorker' in navigator ? (navigator.serviceWorker.controller ? 'bereit, die App funktioniert auch ohne Netz' : 'noch nicht bereit, einmal neu laden') : 'nicht unterstützt';
   parts.push('<section class="card"><h2>App</h2><dl class="kv"><dt>Version</dt><dd>' + APP_VERSION + '</dd><dt>Offline</dt><dd>' + sw + '</dd></dl><div class="row"><button class="btn ghost" type="button" id="updateCheck">Nach Aktualisierung suchen</button><a class="btn ghost" href="#/hilfe" data-nav="help">Hilfe</a></div></section>');
   el.innerHTML = parts.join('');
@@ -222,7 +224,7 @@ const resetNote = () => (S.lastReset && S.lastReset.drafts ? ' Offene Eingaben w
   + (S.lastReset && S.lastReset.unres ? ' Ungeklärte Speicherversuche des vorherigen Stands sind damit hinfällig.' : '');
 async function doImport(){
   const d = S.importDraft; if (!d || S.importBusy) return;
-  if (!d.counts.bikes) { toast('Diese Sicherung enthält keine Motorräder und wird nicht eingespielt.'); return; }
+  if (!d.counts.bikes && !d.counts.parts && !d.navigation) { toast('Diese Sicherung enthält keine Motorräder, Lagerartikel oder Menübelegung und wird nicht eingespielt.'); return; }
   S.importBusy = true; S.lastReset = null; renderData();
   try { await replaceGuarded('import', () => applyDraft(d, d.source === 'v8-local' ? 'Übernahme der bisherigen Version' : 'Sicherung eingespielt')); }
   catch (e) {

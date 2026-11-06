@@ -17,6 +17,8 @@ export const S = {
   bikes: {}, log: [], rides: [], setups: [], parts: [], defects: [], der: {},
   meta: {changeSeq: 0, lastBackupAt: null, lastBackupSeq: 0, lastBackupName: '', lastBackupSize: 0, lastBackupHow: ''},
   editing: {}, logTasks: new Set(), editSetup: null, pending: null,
+  /* ab 1.2.0: Grundlage offener Bearbeiten-Formulare (Technik), Logbuch-Formular (Tätigkeiten, Bearbeiten), Checkliste, Reihenfolge */
+  editBase: {}, logWork: [], logIvMan: {}, logIvAuto: new Set(), logOrig: '', logOpen: [], logEdit: null, logEditPrev: null, checkDraft: null, ordering: false,
   adding: false, doneOpen: null, doneDraft: null, oemDraft: null, importDraft: null,
   ops: {}, gen: {}, lastErr: null, qtyBusy: new Set(), defDone: null, defDoneDraft: null, defEdit: null, defKeep: null, defBusy: new Set(),
   addPhoto: null, photoBusy: null, keepFiles: [], update: null, blocked: false, otherTab: false, v8: null, persisted: null, estimate: null, backup: null, snapshot: null, lastImport: null, migration: null,

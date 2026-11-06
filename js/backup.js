@@ -5,11 +5,11 @@
 import * as DB from './db.js';
 import {makeZip, readZip, isZip} from './zip.js';
 import {sha256, sniff} from './images.js';
-import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans, needsV6, needsV7, ZIP_FORMAT, ZIP_VERSION, ZIP_VERSION_METER, ZIP_VERSION_ORPH, ZIP_VERSION_PLAIN, DEP_COLLS, KEYS, NAMES} from './domain.js';
+import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans, needsV6, needsV7, needsV8, ZIP_FORMAT, ZIP_VERSION, ZIP_VERSION_V8, ZIP_VERSION_POS, ZIP_VERSION_METER, ZIP_VERSION_ORPH, ZIP_VERSION_PLAIN, DEP_COLLS, KEYS, NAMES} from './domain.js';
 import {COLLS} from './state.js';
 import {pad, canon, isISO, fmtDate} from './util.js';
 
-export const APP_VERSION = '1.1.2';
+export const APP_VERSION = '1.3.2';
 export const V8_LOCAL_KEY = 'wh-garage-local';
 const MAX_JSON = 60 * 1024 * 1024;
 const enc = new TextEncoder();
@@ -49,12 +49,14 @@ export async function buildBackup(){
   const now = new Date();
   const byId = (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   /* Version nur so hoch wie nötig: ältere App-Versionen können Sicherungen ohne neue Angaben weiter lesen */
-  const json = {format: ZIP_FORMAT, version: needsV7(next) ? ZIP_VERSION : needsV6(next) ? ZIP_VERSION_METER : sp.count ? ZIP_VERSION_ORPH : ZIP_VERSION_PLAIN, app: APP_VERSION, exportiert: now.toISOString(), stand: {changeSeq: info.changeSeq || 0}};
+  const nav = (recs.meta || []).find(m => m.k === 'navigation') || null;
+  const json = {format: ZIP_FORMAT, version: nav ? ZIP_VERSION : needsV8(next) ? ZIP_VERSION_V8 : needsV7(next) ? ZIP_VERSION_POS : needsV6(next) ? ZIP_VERSION_METER : sp.count ? ZIP_VERSION_ORPH : ZIP_VERSION_PLAIN, app: APP_VERSION, exportiert: now.toISOString(), stand: {changeSeq: info.changeSeq || 0}};
   COLLS.forEach(c => { json[KEYS[c]] = (recs[c] || []).filter(d => c === 'bikes' || sp.clean[c][d.id]).sort(byId); });
   if (sp.count) {
     json.verwaist = {};
     DEP_COLLS.forEach(c => { const a = (recs[c] || []).filter(d => sp.orphans[c][d.id]).sort(byId); if (a.length) json.verwaist[KEYS[c]] = a; });
   }
+  if (nav) json.navigation = nav;
   json.dateien = dateien;
   json.fehlend = fehlend;
   const c = counts(next);
@@ -81,7 +83,7 @@ function draftOf(r, extra){
   const bikes = Object.values(r.next.bikes).map(b => ((b.nickname ? b.nickname + ' – ' : '') + (b.brand + ' ' + (b.model || '')).trim() + (b.year ? ' (' + b.year + ')' : '')));
   const orphans = r.orphans || null;
   const orphanCount = orphans ? DEP_COLLS.reduce((n, k) => n + Object.keys(orphans[k] || {}).length, 0) : 0;
-  return Object.assign({next: r.next, orphans, orphanCount, files: r.files || [], missing: r.missing || [], counts: c, bikes, source: r.source, version: r.version,
+  return Object.assign({navigation: r.navigation || null, next: r.next, orphans, orphanCount, files: r.files || [], missing: r.missing || [], counts: c, bikes, source: r.source, version: r.version,
     exported: isISO(String(r.exported || '').slice(0, 10)) ? r.exported : ''}, extra || {});
 }
 export async function readBackupFile(file){
@@ -129,7 +131,7 @@ async function readZipBackup(blob, name){
 function asArrays(next){ const o = {}; COLLS.forEach(c => { o[c] = Object.keys(next[c] || {}).map(id => Object.assign({}, next[c][id], {id})); }); return o; }
 
 /* Nach dem Schreiben alles zurücklesen und mit der geprüften Vorlage vergleichen */
-export async function verifyStored(next, files){
+export async function verifyStored(next, files, navigation){
   const back = await DB.readRecords(COLLS.concat(['files']));
   for (const c of COLLS) {
     const want = next[c] || {}, got = back[c] || [];
@@ -147,6 +149,7 @@ export async function verifyStored(next, files){
     const h = have.get(f.id);
     if (!h || !(h.blob instanceof Blob) || h.blob.size !== f.blob.size) return 'Eine Datei fehlt nach dem Speichern.';
   }
+  if (navigation !== undefined && canon((await DB.getMeta('navigation')) || null) !== canon(navigation)) return 'Die Menübelegung weicht nach dem Speichern ab.';
   return '';
 }
 
@@ -158,11 +161,11 @@ export async function applyDraft(draft, how){
   if (draft.source === 'v8-local') meta.push({k: 'migration', from: 'v8-local', at: Date.now(), counts: draft.counts, verified: false, sourceKept: true});
   const exportedAt = draft.exported ? Date.parse(draft.exported) : NaN;
   /* Scheitert dieser Schritt, ist nichts verändert. */
-  const res = await DB.replaceAll(next, draft.files || [], {reason: how || 'Sicherung eingespielt', refsOf, meta,
+  const res = await DB.replaceAll(next, draft.files || [], {reason: how || 'Sicherung eingespielt', refsOf, meta, navigation: draft.navigation || null,
     importSeq: draft.source === 'zip' && !isNaN(exportedAt) ? {at: exportedAt, name: draft.fileName || 'Sicherung', size: draft.size || 0} : null});
   /* Ab hier ist der neue Bestand gespeichert: Abweichungen ehrlich melden, nie „unverändert“ behaupten */
   let bad;
-  try { bad = await verifyStored(all, draft.files); } catch (e) { bad = 'Die Prüfung konnte nicht abgeschlossen werden.'; }
+  try { bad = await verifyStored(all, draft.files, draft.navigation || null); } catch (e) { bad = 'Die Prüfung konnte nicht abgeschlossen werden.'; }
   if (bad) { const e = err('Die Sicherung wurde eingespielt, aber beim Nachprüfen gab es eine Abweichung: ' + bad + ' Der vorherige Stand liegt als Sicherheitskopie unter „Daten & Sicherung“.'); e.committed = true; throw e; }
   if (draft.source === 'v8-local') await DB.setMeta({k: 'migration', from: 'v8-local', at: Date.now(), counts: draft.counts, verified: true, sourceKept: true});
   return res;
@@ -178,10 +181,10 @@ export async function restoreSnapshot(){
   const s = await DB.getSnapshot();
   if (!s) throw err('Es gibt keine Sicherheitskopie.');
   const next = {}; COLLS.forEach(c => { next[c] = s.data[c] || []; });
-  await DB.replaceAll(next, [], {reason: 'Vor dem Wiederherstellen', refsOf});
+  await DB.replaceAll(next, [], {reason: 'Vor dem Wiederherstellen', refsOf, navigation: s.navigation || null});
   const back = toNext(next);
   let bad;
-  try { bad = await verifyStored(back, []); } catch (e) { bad = 'Die Prüfung konnte nicht abgeschlossen werden.'; }
+  try { bad = await verifyStored(back, [], s.navigation || null); } catch (e) { bad = 'Die Prüfung konnte nicht abgeschlossen werden.'; }
   if (bad) { const e = err('Die Sicherheitskopie wurde zurückgeholt, aber beim Nachprüfen gab es eine Abweichung: ' + bad); e.committed = true; throw e; }
 }
 

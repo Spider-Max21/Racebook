@@ -17,10 +17,10 @@
      nicht Teil der Sicherung.
    - Keine Oberfläche, keine Fachlogik. */
 
-import {bikeFp} from './util.js';
+import {bikeFp, canon} from './util.js';
 
 export const DB_NAME = 'racebook';
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 export const REC = ['bikes', 'log', 'rides', 'setups', 'parts', 'defects'];
 /* Bereiche, deren Einträge immer zu einem Motorrad gehören (Teile: Motorrad oder 'both') */
 export const DEP = ['log', 'rides', 'setups', 'defects'];
@@ -50,6 +50,14 @@ export const MIGRATIONS = [
   (d, tx) => {
     const m = tx.objectStore('meta'), r = m.get('info');
     r.onsuccess = () => { const i = r.result || {k: 'info', created: Date.now(), changeSeq: 0}; i.schema = 3; if (typeof i.epoch !== 'string' || !i.epoch) i.epoch = newEpoch(); m.put(i); };
+  },
+  /* 4 (ab 1.2.0): Tätigkeiten im Logbuch, Checkliste und Favoriten je Motorrad, Schutz des ganzen Entwurfs beim Speichern.
+        Die gespeicherten Einträge bleiben unverändert (neue Felder entstehen erst beim Bearbeiten). Die neue Version trennt
+        noch offene Fenster mit 1.1.x vom Speicher: Sie kennen die neuen Felder und den Entwurfsschutz nicht und müssen neu
+        laden, bevor sie wieder schreiben. Bestandskennung und Änderungszähler bleiben erhalten. */
+  (d, tx) => {
+    const m = tx.objectStore('meta'), r = m.get('info');
+    r.onsuccess = () => { const i = r.result || {k: 'info', created: Date.now(), changeSeq: 0}; i.schema = 4; if (typeof i.epoch !== 'string' || !i.epoch) i.epoch = newEpoch(); m.put(i); };
   }
 ];
 
@@ -154,6 +162,9 @@ export const epochOf = meta => { const i = (meta || []).find(m => m && m.k === '
        nachkaufen ab). op: feste Vorgangskennung; schon angewendet → nichts ändern (Ergebnis dup).
    opts.bump (Standard true): Änderungszähler für die Sicherungserinnerung erhöhen.
    opts.epoch: Bestandskennung, zu der der Vorgang gehört. Stimmt sie nicht mehr, wird nichts geschrieben.
+   patch mit guard ({Feld: Wert}, ab 1.2.0): nur schreiben, wenn diese Felder im Speicher noch genau den Werten entsprechen, auf
+     denen der Entwurf beruht (Vergleich über canon); sonst Fehler 'changed'. So überschreibt ein älterer Entwurf keine
+     inzwischen gespeicherten Änderungen dieser Felder, auch nicht aus einem anderen Fenster.
    opts.expect: {bike, fp} – nur schreiben, wenn Motorrad, Logbuch und Fahrten dieses Motorrads im Speicher noch genau
      dem Stand entsprechen, auf dem der Vorgang beruht (Fingerabdruck, util.bikeFp); sonst Fehler 'changed'.
      Für Berichtigungen, deren Vorschau aus mehreren Einträgen berechnet wurde.
@@ -177,11 +188,11 @@ export function commit(ops, opts){
   opts = opts || {};
   return new Promise((resolve, reject) => {
     const stores = new Set(ops.map(o => o.store));
-    const bump = opts.bump !== false && ops.some(o => REC.includes(o.store));
+    const bump = opts.bump === true || (opts.bump !== false && ops.some(o => REC.includes(o.store)));
     const guard = typeof opts.epoch === 'string';
     const adj = ops.filter(o => o.type === 'adjust');
     if (adj.some(o => o.store !== 'parts' || !validOp(o.op) || !Number.isInteger(o.add))) { reject({code: 'invalid', message: 'Ungültige Bestandsänderung'}); return; }
-    if (bump || guard || adj.length) stores.add('meta');
+    if (bump || guard || adj.length || opts.expectMeta) stores.add('meta');
     const expect = opts.expect && typeof opts.expect.fp === 'string' ? opts.expect : null;
     if (expect) ['bikes', 'log', 'rides'].forEach(s => stores.add(s));
     if (ops.some(needsBike)) stores.add('bikes');
@@ -194,7 +205,7 @@ export function commit(ops, opts){
     tx.oncomplete = () => {
       done = true;
       resolve(result);
-      const touched = Array.from(stores).filter(s => s !== 'meta');
+      const touched = Array.from(stores).filter(s => s !== 'meta' || ops.some(o => o.store === 'meta' && o.value && o.value.k === 'navigation'));
       if (touched.length) {
         changeCbs.forEach(cb => cb(new Set(touched), 'local'));
         try { if (chan) chan.postMessage({stores: touched}); } catch (e) {}
@@ -236,6 +247,7 @@ export function commit(ops, opts){
             const r = st.get(o.id);
             r.onsuccess = () => {
               if (!r.result) { fail({code: 'not_found', message: o.store + '/' + o.id}); return; }
+              if (o.guard && Object.keys(o.guard).some(f => canon(r.result[f] === undefined ? null : r.result[f]) !== canon(o.guard[f] === undefined ? null : o.guard[f]))) { fail({code: 'changed', message: 'Diese Daten wurden inzwischen geändert.'}); return; }
               st.put(Object.assign(r.result, o.patch));
             };
           } else if (o.type === 'adjust') {
@@ -246,6 +258,10 @@ export function commit(ops, opts){
               else if (!r.result) { fail({code: 'not_found', message: o.store + '/' + o.id}); return; }
               else {
                 const d = r.result;
+                /* Ab 1.3.1: geänderte Artikelangaben nur auf der Grundlage beim Öffnen (guard). Steht dort inzwischen ein
+                   anderer Wert (und nicht schon derselbe neue), wird nichts geändert, auch nicht die Anzahl. */
+                const cv = v => canon(v === undefined ? null : v);
+                if (o.guard && Object.keys(o.guard).some(f => cv(d[f]) !== cv(o.guard[f]) && !(o.set && cv(d[f]) === cv(o.set[f])))) { fail({code: 'changed', message: 'Dieser Artikel wurde inzwischen geändert.'}); return; }
                 d.qty = clampQty(clampQty(d.qty) + o.add);
                 if (o.set) Object.assign(d, o.set);
                 if (o.low) d.min = Math.max(clampQty(d.min), d.qty);
@@ -295,15 +311,20 @@ export function commit(ops, opts){
       const l = tx.objectStore('log').getAll(); l.onsuccess = () => { got.log = l.result; done1(); };
       const r = tx.objectStore('rides').getAll(); r.onsuccess = () => { got.rides = r.result; done1(); };
     };
+    const checkMeta = next => {
+      if (!opts.expectMeta) { next(); return; }
+      const r = tx.objectStore('meta').get(opts.expectMeta.k);
+      r.onsuccess = () => { if (canon(r.result || null) !== canon(opts.expectMeta.value || null)) { fail({code:'changed', message:'Die Menübelegung wurde in einem anderen Fenster geändert.'}); return; } next(); };
+    };
     if (guard) {
       /* Bestandskennung zuerst lesen; erst wenn sie stimmt, wird geschrieben */
       const r = tx.objectStore('meta').get('info');
       r.onsuccess = () => {
         const ep = (r.result && typeof r.result.epoch === 'string') ? r.result.epoch : '';
         if (ep !== opts.epoch) { fail({code: 'stale', message: 'Der Bestand wurde inzwischen ersetzt.'}); return; }
-        checkExpect(run);
+        checkMeta(() => checkExpect(run));
       };
-    } else checkExpect(run);
+    } else checkMeta(() => checkExpect(run));
   });
 }
 
@@ -352,7 +373,8 @@ export function replaceAll(next, files, info){
     };
     tx.onabort = () => { if (!done) reject(injected || mapErr(tx.error || {name: 'AbortError'})); };
     const old = {};
-    let pending = REC.length + 1, existing = new Map();
+    let pending = REC.length + 2, existing = new Map(), oldNavigation = null;
+    const nr = tx.objectStore('meta').get('navigation'); nr.onsuccess = () => { oldNavigation = nr.result || null; step(); };
     REC.forEach(s => { const r = tx.objectStore(s).getAll(); r.onsuccess = () => { old[s] = r.result; step(); }; });
     const fr = tx.objectStore('files').getAll();
     fr.onsuccess = () => { fr.result.forEach(f => existing.set(f.id, f)); step(); };
@@ -365,11 +387,11 @@ export function replaceAll(next, files, info){
           const ex = existing.get(f.id);
           if (ex && ex.sha256 && f.sha256 && ex.sha256 !== f.sha256) { injected = {code: 'conflict', message: f.id}; tx.abort(); return; }
         }
-        const had = REC.some(s => old[s].length);
+        const had = REC.some(s => old[s].length) || !!oldNavigation;
         const snapStore = tx.objectStore('snapshots');
         if (had && info.snapshot !== false) {
           const fileIds = info.refsOf ? Array.from(info.refsOf(old)) : [];
-          const snap = {id: 'vor-ersetzen', created: Date.now(), reason: info.reason || 'Ersetzen', data: old, fileIds};
+          const snap = {id: 'vor-ersetzen', created: Date.now(), reason: info.reason || 'Ersetzen', data: old, navigation: oldNavigation, fileIds};
           snapStore.put(snap); res.snapshot = {created: snap.created, counts: REC.reduce((a, s) => { a[s] = old[s].length; return a; }, {})};
         } else if (info.dropSnapshot) snapStore.clear();
         let n = 0;
@@ -391,6 +413,7 @@ export function replaceAll(next, files, info){
           i.epoch = newEpoch(); i.schema = DB_VERSION;
           ms.put(i); res.changeSeq = i.changeSeq; res.epoch = i.epoch;
           if (info.meta) info.meta.forEach(m => ms.put(m));
+          if (info.navigation) ms.put(info.navigation); else ms.delete('navigation');
           if (info.importSeq) {
             /* Eine frisch eingespielte Sicherung gilt als gesichert: Stand = Sicherung */
             const b = {k: 'backup', at: info.importSeq.at, seq: i.changeSeq, name: info.importSeq.name, size: info.importSeq.size, how: 'import', epoch: i.epoch};

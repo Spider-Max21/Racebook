@@ -361,7 +361,7 @@ label.btn{margin:0;font-size:15px;color:var(--ink)}
 /* ---------- Bereichsleiste unten ---------- */
 .tabs{position:fixed;left:0;right:0;bottom:0;z-index:15;background:var(--bar);border-top:1px solid #2A2F35;padding-bottom:env(safe-area-inset-bottom,0px)}
 .tabs[hidden]{display:none}
-.tabs-in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));padding:0 max(4px,env(safe-area-inset-right,0px)) 0 max(4px,env(safe-area-inset-left,0px))}
+.tabs-in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));padding:0 max(4px,env(safe-area-inset-right,0px)) 0 max(4px,env(safe-area-inset-left,0px))}
 .tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:60px;padding:6px 0;background:none;border:0;color:var(--bar-muted);font:600 11.5px/1.1 var(--f-cond);font-stretch:condensed;letter-spacing:-.01em;cursor:pointer;min-width:0;position:relative}
 .tab span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tab .ic{width:23px;height:23px}
@@ -453,3 +453,68 @@ dialog::backdrop{background:rgba(6,8,10,.72)}
 .qhelp summary{cursor:pointer;min-height:44px;display:flex;align-items:center;color:var(--accent-text);font-weight:600;text-decoration:underline;text-underline-offset:3px}
 .qlist{margin:6px 0 8px;padding-left:20px}
 .qlist li{margin:4px 0}
+
+/* ---------- ab 1.2.0: Tätigkeiten, Intervallvorschlag, Bearbeiten, Checkliste, Reihenfolge ---------- */
+.work-set{display:flex;flex-direction:column;gap:10px}
+.work-list{display:flex;flex-direction:column;gap:6px}
+.work-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr) auto auto;gap:6px;align-items:center;border:1px solid var(--line);border-radius:var(--r-s);padding:6px 8px;background:var(--surface-2)}
+.work-row .work-name{min-width:0;overflow-wrap:anywhere}
+.work-row input{min-height:44px;padding:8px 10px}
+@media (max-width:520px){.work-row{grid-template-columns:minmax(0,1fr) auto auto}.work-row input{grid-column:1/-1;grid-row:2}}
+.mini.star[aria-pressed="true"]{border-color:var(--ink)}
+.chip.proposed{border-style:dashed}
+.chip.fav{font-weight:700}
+.chip.free{font-style:italic}
+.chip .x{background:none;border:0;color:inherit;font:700 16px var(--f-body);padding:0 0 0 6px;min-height:0;cursor:pointer}
+.work-res{display:flex;flex-wrap:wrap;gap:6px}
+.iv-list{display:flex;flex-direction:column;gap:4px}
+.iv-list .check,.check-edit .check{margin:0}
+details.orig{margin-top:6px;font-size:14px;color:var(--muted)}
+details.orig summary{cursor:pointer;min-height:32px;display:inline-flex;align-items:center}
+details.orig p{white-space:pre-wrap;margin:4px 0 0;color:var(--ink)}
+.entry-iv{font-size:13px}
+.entry-foot .row{gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.check-edit{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.check-edit li{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.check-edit li .row{gap:4px;flex-wrap:nowrap}
+.order-list{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.order-row{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-left:6px solid var(--pb);border-radius:var(--r-s);padding:6px 8px;background:var(--surface-2)}
+.order-row.dragging{opacity:.85;outline:2px solid var(--accent)}
+.order-row .order-name{flex:1;min-width:0;overflow-wrap:anywhere}
+.handle{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;cursor:grab;touch-action:none;border-radius:var(--r-s);color:var(--muted);user-select:none;-webkit-user-select:none}
+.handle:active{cursor:grabbing}
+.handle .ic{width:22px;height:22px}
+
+/* 1.3: app-wide navigation, warehouse and personal menu */
+body:not([data-page="error"]) .wrap{padding-bottom:calc(96px + env(safe-area-inset-bottom,0px))}
+body:not([data-page="error"]) .toast{bottom:calc(78px + env(safe-area-inset-bottom,0px))}
+.page-intro{margin:0 0 4px}
+.section-title{font:700 23px/1.2 var(--f-cond);margin:2px 0}
+.bike-context{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:12px 14px}
+.bike-context label{margin:0;font-size:12px;color:var(--muted)}
+.bike-context select{min-width:0}
+.bike-section-links{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 10px}
+.context-section{font-weight:700;min-width:0;overflow-wrap:anywhere}
+.more-sheet{width:min(620px,calc(100vw - 16px));max-height:calc(90dvh - env(safe-area-inset-bottom,0px));margin:auto auto 8px;border-radius:20px 20px 12px 12px;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));box-shadow:0 -8px 40px #0004}
+.more-sheet .card-h{flex:none;margin:0}
+.more-body{overflow-y:auto;min-height:0;padding-right:2px}
+.more-body h3{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:16px 0 8px}
+.more-body h3:first-child{margin-top:0}
+.menu-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.menu-link{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--surface-2);color:var(--ink);min-height:54px;text-align:left;font:600 14px var(--f-body);cursor:pointer;min-width:0}
+.menu-link span{overflow-wrap:normal;hyphens:auto;min-width:0}
+.menu-link .ic{flex:none;width:20px;height:20px}
+.check-filter{display:flex;gap:8px;align-items:center;font-size:14px;margin-top:12px}
+.check-filter input{width:20px;height:20px;accent-color:var(--accent)}
+#partsBody .part{flex-wrap:wrap;gap:10px}
+#partsBody .part>div:first-child{flex:1;min-width:140px}
+#partsBody .qty{flex-wrap:wrap;justify-content:flex-end;gap:6px}
+.nav-fixed{display:flex;align-items:center;gap:10px;padding:12px;border:1px dashed var(--line);border-radius:8px}
+.nav-fixed .hint{margin-left:auto}
+.nav-choice{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
+.nav-choice .f{flex:1;min-width:0}
+.nav-choice select{min-width:0;width:100%}
+.nav-arrows{display:flex;flex-direction:column;gap:4px}
+.nav-grip{padding:8px;touch-action:none;cursor:grab}
+@media(min-width:800px){.more-sheet{margin:auto;border-radius:16px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}

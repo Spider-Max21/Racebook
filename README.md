@@ -1,4 +1,4 @@
-# Racebook – eigenständige App (PWA), Version 1.1.2
+# Racebook – eigenständige App (PWA), Version 1.3.2
 
 Racebook ist ein Wartungsheft für Motorräder: Wartung und Fälligkeiten, Logbuch, Fahrten, Fahrwerk-Setups, Teilevorrat, Mängel, Fotos und Bedienungsanleitung. Diese Fassung läuft als installierbare Web-App (PWA) im Browser, speichert alles **nur auf dem Gerät** (IndexedDB) und funktioniert nach dem ersten Laden auch ohne Netz.
 
@@ -65,7 +65,7 @@ Die Claude-App speichert in deinem Claude-Konto, die neue App auf dem Gerät. Ei
 1. Racebook in Claude öffnen → **Garage → Daten**.
 2. „Sicherung speichern (.json)“ antippen. Falls dort „Sicherung kopieren“ steht: antippen, der Text liegt dann in der Zwischenablage.
 3. Neue App öffnen → **Daten & Sicherung → Sicherung einspielen** → die `.json`-Datei wählen **oder** den kopierten Text in das Feld einfügen und „Eingefügten Text prüfen“ tippen.
-4. Die Vorschau zeigt Motorräder, Anzahl der Einträge und – einzeln benannt – **welche Anhänge nicht übernommen werden können**. Fotos und PDFs, die in der Claude-App hochgeladen wurden, liegen in Claudes Dateispeicher und stecken nicht in der JSON-Sicherung. Lade sie bei Bedarf neu hoch (Technik → Foto, Handbuch → PDF). Web-Links zu Anleitungen bleiben erhalten.
+4. Die Vorschau zeigt Motorräder, Anzahl der Einträge und – einzeln benannt – **welche Anhänge nicht übernommen werden können**. Fotos und PDFs, die in der Claude-App hochgeladen wurden, liegen in Claudes Dateispeicher und stecken nicht in der JSON-Sicherung. Lade sie bei Bedarf neu hoch (Fahrzeugdaten → Foto, Handbuch → PDF). Web-Links zu Anleitungen bleiben erhalten.
 5. „Alle Daten ersetzen“ tippen. Die App schreibt alles in einem Schritt, liest es danach zurück und vergleicht es mit der Sicherung. Erst dann meldet sie den Erfolg.
 
 Die Daten in Claude bleiben dabei unverändert.
@@ -78,7 +78,7 @@ Eine leere Garage wird nie als erfolgreiche Übernahme gemeldet: Ohne Motorräde
 ## 5. Sicherung und Wiederherstellung
 
 - **Sicherung erstellen:** Daten & Sicherung → „Sicherung herunterladen“. Es entsteht eine ZIP-Datei `racebook-sicherung-JJJJ-MM-TT-HHMM.zip` mit
-  - `racebook.json`: alle Einträge (Format `racebook-backup`, Version 4; Version 5, wenn Einträge ohne Motorrad dabei sind, siehe unten; Version 6, wenn ein Zählerwechsel oder eine Tippfehler-Berichtigung gespeichert ist, siehe Abschnitt 9a; Version 7, wenn bei einem Motorrad mit Zählerwechsel Startwerte oder Montagen ihre Stelle im Tag mitbringen – 1.1.0 lehnt diese mit Hinweis ab, statt sie falsch zuzuordnen),
+  - `racebook.json`: alle Einträge (Format `racebook-backup`, Version 4; Version 5, wenn Einträge ohne Motorrad dabei sind, siehe unten; Version 6, wenn ein Zählerwechsel oder eine Tippfehler-Berichtigung gespeichert ist, siehe Abschnitt 9a; Version 8 (ab 1.2.0), wenn Logbuch-Einträge Tätigkeiten oder eine Originaleingabe enthalten, bearbeitet wurden oder ein Motorrad eine eigene Checkliste oder Favoriten hat – 1.1.x lehnt diese mit Hinweis ab; Version 7, wenn bei einem Motorrad mit Zählerwechsel Startwerte oder Montagen ihre Stelle im Tag mitbringen – 1.1.0 lehnt diese mit Hinweis ab, statt sie falsch zuzuordnen), Ab 1.3.0 Version 9 nur, wenn eine persönliche Menübelegung gespeichert ist; sonst bleibt die Version so niedrig wie bisher, damit ältere Fassungen solche Sicherungen weiter lesen.
   - `dateien/…`: alle Fotos und PDFs als echte Dateien, jeweils mit SHA-256-Prüfsumme in `racebook.json`,
   - `LIESMICH.txt`: kurze Erklärung.
 - **„Sicherung teilen …“** übergibt die ZIP-Datei an Android (z. B. Google Drive, Mail).
@@ -106,6 +106,8 @@ Ist eine neue Version veröffentlicht, lädt die App sie im Hintergrund und zeig
 
 1.1.0 ändert das Speicherformat nicht (`DB_VERSION` bleibt 3): Logbuch-Einträge bekommen nur bei Bedarf die neuen Felder `meterNew` (Zählerwechsel) und `fix` (Berichtigung). Vorhandene Einträge bleiben Byte für Byte gleich; eine Umwandlung ist nicht nötig.
 
+1.2.0 hebt den Gerätespeicher auf Version 4 (`DB_VERSION` 4). Die gespeicherten Einträge bleiben unverändert; neue Felder (`work`, `orig`, `edited` im Logbuch, `checklist`, `favs` beim Motorrad) entstehen nur bei Bedarf. Noch offene Fenster mit 1.1.x werden dabei vom Speicher getrennt und bitten um „Neu laden“. Haken der Checkliste vom laufenden Tag werden übernommen.
+
 1.1.1 ebenso: Startwerte und Montagen bekommen beim Speichern nur bei Bedarf das Feld `lastC` bzw. `c` (Stelle im Verlauf ihres Tages, siehe Abschnitt 9a). Angaben aus 1.1.0 und älter bleiben unverändert; liegt eine davon auf dem Tag eines Zählerwechsels, fragt die App einmal nach, welcher Zähler gemeint war.
 
 ## 7. Aufbau
@@ -129,9 +131,11 @@ js/images.js          Fotos: Ausrichtung, Verkleinern, Zuschnitt, Vorschaubild, 
 js/cropper.js         Dialog für den Bildausschnitt
 js/zip.js             ZIP schreiben und lesen (ohne fremde Bibliothek)
 js/backup.js          Sicherung, Einspielen, Übernahme der bisherigen Version
+js/work.js            Tätigkeitskatalog, Erkennung im Text, betroffene Wartungsintervalle (ab 1.2.0)
+js/drafts.js          Bearbeitungsvorgänge, Rückfrage „Du hast ungespeicherte Änderungen.“ (ab 1.2.0)
 js/views/*.js         Ansichten: Übersicht, Motorrad, Mängel, Daten & Sicherung; counter.js: Rückfrage bei Sprüngen,
                       Tippfehler berichtigen (Vorschau), Zählerwechsel
-tests/                automatische Tests: nicht im App-ZIP, sondern im Test-ZIP racebook-pwa-tests-1.1.2.zip,
+tests/                automatische Tests: nicht im App-ZIP, sondern im Test-ZIP racebook-pwa-tests-1.2.2.zip,
                       das sich in denselben Ordner entpackt (siehe tests/README.md)
 ```
 
@@ -141,7 +145,9 @@ Keine externen Bibliotheken, keine Schriftarten aus dem Netz, keine Verbindung z
 
 - Gestaltung ab 1.1.0: Die Oberfläche ist neutral in Anthrazit, Weiß und Grautönen. Die Markenfarbe erscheint nur beim jeweiligen Motorrad, am Nummernschild und am linken Kartenrand (zum Beispiel KTM orange, Suzuki gelb). Rot, Bernstein und Grün stehen weiter für überfällig, bald fällig und in Ordnung, unabhängig von der Marke.
 - **Meine Garage** ist die Übersicht aller Motorräder (Startseite, so überschrieben). Auf der Seite eines Motorrads steht über dem Foto bzw. über dem Inhalt der Knopf **„Meine Garage“** mit Garagen-Symbol; er führt direkt dorthin zurück. Die untere Leiste hat dafür keinen eigenen Reiter.
-- Unten wählst du den Bereich des Motorrads: Status, Mängel, Logbuch, Fahrten, Setup, **Technik** (Motorrad, Reifen & Kette, Öle, Teilevorrat, Wartungsintervalle) und Handbuch. Passt ein Name nicht ganz, steht eine Kurzform da („Log“, „Handb.“).
+- Ab 1.3.0 bleibt die Hauptnavigation in allen Bereichen sichtbar: Garage, drei wählbare Favoriten, Mehr. Standard: Lager, Logbuch, Fahrten. Menü anpassen unter Einstellungen. Die Motorradbereiche heißen Fahrzeugdaten, Verbaute Teile, Technische Daten, Wartungsintervalle; Lager ist gemeinsam. Eine vorhandene Technik-Adresse wird auf Fahrzeugdaten umgeleitet.
+- **Ab 1.2.0:** „Reihenfolge ändern“ in „Meine Garage“ (Ziehgriff, ▲/▼, Pfeiltasten). Im Logbuch Tätigkeiten aus einem Katalog (häufige Arbeiten, Suche, Favoriten je Motorrad, eigene), getrennt davon die betroffenen Wartungsintervalle; Einträge lassen sich mit Vorschau der Folgen bearbeiten. Checkliste „Vor der Fahrt“ mit „Gabel entlüften“, je Motorrad anpassbar.
+- **Ab 1.2.1:** „Bremsflüssigkeit nachgefüllt“, „Benzinsieb gereinigt“ und ähnliche Angaben sind eigene Tätigkeiten, kein Wechsel; ein Wechselintervall bleibt dabei unverändert. Ein noch nicht hinzugefügter eigener Checklisten-Punkt wird beim Speichern mitgenommen (ab 1.2.2 höchstens 40 Punkte; darüber bleibt der Punkt mit Hinweis im Feld). Ab 1.2.2 speichert die Anleitung (Link, PDF, Entfernen) nur auf der Grundlage, die das Formular gezeigt hat; ändert ein anderes Fenster sie inzwischen, bleibt die eigene Eingabe mit Hinweis stehen.
 - Bei „Motorrad hinzufügen“ stehen die Marken alphabetisch, „Andere“ am Ende; vorausgewählt ist keine.
 
 ## 9. Schnell-Eintrag
@@ -180,8 +186,8 @@ Im Zweifel wird also nichts als erledigt eingetragen. War es doch erledigt, übe
 - **Tippfehler berichtigen:** Ist ein neu eingetippter Stand niedriger als der aktuelle, bietet Racebook neben „Korrektur speichern“ auch „Tippfehler berichtigen …“ an (am Schild und im Schnell-Eintrag „Stand: …“). Die falsche Ablesung bekommt dann den richtigen Wert: der neue Stand minus allem, was seitdem gefahren wurde (Beispiel: 566 h statt 52 h, seitdem 2 h gefahren, heute 54 h → die Ablesung wird 52 h). Eine zusätzliche Ablesung entsteht nicht; der alte Wert bleibt am Eintrag vermerkt („berichtigt, vorher 566 h“).
 - **Vorschau:** Vor dem Übernehmen zeigt ein Fenster die falsche Ablesung mit Datum, alten und neuen Wert, alle betroffenen Einträge mit Datum, altem und vorgeschlagenem Stand, und was sich bei den Fälligkeiten ändert. Wartungen „aus dem Verlauf“ (ohne eingetippten Stand) sind vorausgewählt; abwählen hält ihren alten Wert fest. Eingetippte Stände und Einträge unklarer Herkunft (ältere Daten) werden nie von selbst geändert: dort muss „berichtigen“ oder „so lassen“ gewählt werden, sonst lässt sich nichts übernehmen. Gespeichert wird alles in einem Schritt, und nur, wenn sich die Daten des Motorrads seit der Vorschau nicht geändert haben (auch nicht in einem anderen Fenster); sonst wird die Vorschau neu berechnet.
 - **Wartungsstand prüfen:** Liegt die letzte Wartung eines Punkts über dem heutigen Stand (z. B. weil ein Tippfehler schon als Korrektur gespeichert wurde), zeigt Racebook „Wartungsstand prüfen“ statt einer Restlaufzeit. Lässt sich der Widerspruch als Tippfehler berichtigen, steht oben „Prüfen“ und öffnet dieselbe Vorschau.
-- **Zählerwechsel:** Technik → Stundenzähler (bei km-Motorrädern Kilometerzähler) → „Stundenzähler ersetzt“: Datum, letzter Stand des alten Zählers (leer = berechneter Stand) und Anzeige des neuen. Danach trägst du ein, was der neue Zähler anzeigt. Das Schild zeigt die Zähleranzeige, darunter die Gesamtlaufleistung; Fälligkeiten rechnen mit der Gesamtlaufleistung. Beispiel: gesamt 54 h, neuer Zähler 0 h, später Anzeige 3 h → gesamt 57 h; Wartung bei 50 h mit 50-h-Intervall → noch 43 h. Der Wechsel steht im Logbuch und lässt sich dort löschen.
-- **Am Tag eines Zählerwechsels (ab 1.1.1):** Startwerte (Technik → Intervalle) und Montagen (Reifen & Kette) gelten wie Logbuch-Einträge in der Reihenfolge, in der sie eingetragen wurden. Ein Startwert, der vor dem Wechsel am selben Tag eingetragen wurde, gehört also zum alten Zähler, auch nach weiteren Wechseln. Trägst du einen Wert für einen Tag ein, an dem schon ein Zähler gewechselt wurde, fragt Racebook „Welcher Zähler war gemeint?“ (alter, gegebenenfalls zwischenzeitlicher oder neuer Zähler); nichts ist vorausgewählt. Angaben aus 1.1.0 und älter, bei denen das nicht feststeht, zeigen „Wartungsstand prüfen“ bzw. „Zähler unklar“; oben steht „Angaben zuordnen“ mit derselben Auswahl. Liegt eine Montage über dem heutigen Gesamtstand, steht „Montagestand prüfen“ statt „0 h gelaufen“.
+- **Zählerwechsel:** Fahrzeugdaten → Stundenzähler (bei km-Motorrädern Kilometerzähler) → „Stundenzähler ersetzt“: Datum, letzter Stand des alten Zählers (leer = berechneter Stand) und Anzeige des neuen. Danach trägst du ein, was der neue Zähler anzeigt. Das Schild zeigt die Zähleranzeige, darunter die Gesamtlaufleistung; Fälligkeiten rechnen mit der Gesamtlaufleistung. Beispiel: gesamt 54 h, neuer Zähler 0 h, später Anzeige 3 h → gesamt 57 h; Wartung bei 50 h mit 50-h-Intervall → noch 43 h. Der Wechsel steht im Logbuch und lässt sich dort löschen.
+- **Am Tag eines Zählerwechsels (ab 1.1.1):** Startwerte (Wartung → Intervalle verwalten) und Montagen (Reifen & Kette) gelten wie Logbuch-Einträge in der Reihenfolge, in der sie eingetragen wurden. Ein Startwert, der vor dem Wechsel am selben Tag eingetragen wurde, gehört also zum alten Zähler, auch nach weiteren Wechseln. Trägst du einen Wert für einen Tag ein, an dem schon ein Zähler gewechselt wurde, fragt Racebook „Welcher Zähler war gemeint?“ (alter, gegebenenfalls zwischenzeitlicher oder neuer Zähler); nichts ist vorausgewählt. Angaben aus 1.1.0 und älter, bei denen das nicht feststeht, zeigen „Wartungsstand prüfen“ bzw. „Zähler unklar“; oben steht „Angaben zuordnen“ mit derselben Auswahl. Liegt eine Montage über dem heutigen Gesamtstand, steht „Montagestand prüfen“ statt „0 h gelaufen“.
 - **Neue Montage oder Berichtigung (ab 1.1.2):** Ein neues Reifenmodell bzw. eine neue Kette ist eine neue Montage, auch wenn Stand und Datum zufällig gleich sind wie bei der alten; am Tag eines Zählerwechsels fragt Racebook dann, welcher Zähler gemeint ist (bei leerem Stand nimmt es die aktuelle Anzeige, ohne zu fragen). Wird nur der Stand derselben Montage oder desselben Startwerts am selben Datum berichtigt, bleibt die bisherige Zuordnung.
 - **Auswahl bleibt nur auf ihrem Stand gültig (ab 1.1.2):** Ändern sich die Daten des Motorrads, während „Welcher Zähler war gemeint?“ offen ist (etwa in einem anderen Fenster), berechnet Racebook die Auswahl neu, setzt sie zurück und fragt mit Hinweis erneut. Gespeichert wird nur, wenn der Speicher bestätigt, dass sich seit der Auswahl nichts geändert hat; sonst wird nichts gespeichert und neu gefragt.
 
@@ -193,8 +199,15 @@ Racebook darf in mehreren Tabs oder Fenstern desselben Browsers offen sein. Änd
 - **Motorrad vorhanden:** Ein Eintrag, der zu einem Motorrad gehört, wird nur gespeichert, wenn es das Motorrad im Speicher gibt (ebenfalls in derselben Transaktion). Ein Motorrad wird mit allen tatsächlich gespeicherten Einträgen entfernt, auch mit solchen, die das Fenster noch nicht kennt.
 - **Teilebestand:** Einkäufe und + / − werden in der Transaktion auf den dann gespeicherten Bestand angewendet, jeweils genau einmal (feste Vorgangskennung). Gleichzeitige Änderungen in zwei Fenstern zählen beide; ein wiederholter Speicherversuch zählt nicht doppelt.
 
+- **Grundlage des Entwurfs (ab 1.2.0):** Bearbeiten-Formulare (Technik, Mängel, Logbuch-Einträge, Checkliste, Reihenfolge) schreiben nur die geänderten Felder und nur, wenn diese im Speicher noch dem Stand beim Öffnen entsprechen (geprüft in derselben Transaktion). Sonst wird nichts gespeichert: Racebook zeigt den aktuellen Stand mit den eigenen Änderungen und nennt Konflikte, erst ein erneutes Speichern übernimmt ihn.
+- **Ungespeicherte Eingaben (ab 1.2.0):** Innerhalb eines Fensters fragt Racebook vor jedem Wechsel zu einem anderen Motorrad, Bereich oder Formular nach („Speichern“, „Verwerfen“, „Weiter bearbeiten“). Während gespeichert wird, beginnt kein zweiter Vorgang. Ab 1.2.1 ist auch innerhalb eines Bereichs nur ein Formular in Arbeit: Ein weiteres Formular öffnen schließt ein unverändertes offenes; Tippen oder Klicken in ein anderes Formular führt bei geänderten Eingaben zur Rückfrage. Der Link zur Anleitung ist ebenfalls geschützt und wird für das Motorrad gespeichert, zu dem das Formular gehört.
+
 Racebook möglichst nur an einer Stelle offen halten (installierte App oder Browser). Hängt ein Speichervorgang länger als etwa 4 Sekunden, zeigt Racebook einen Hinweis, dass vermutlich ein anderes Fenster den Speicher blockiert.
 
 ## 11. Grenzen dieser Fassung
 
 Siehe `Racebook-PWA-Ueberblick.md` (Änderungen, Grenzen, nächste Schritte) und den Testbericht im Test-ZIP (`tests/TESTBERICHT.md`).
+
+## Entwicklung 1.3.0
+
+Gezielte neue Modellprüfungen: `node --test tests/navigation.test.mjs` (Node 18+). Keine Installation von Paketen nötig. Sicherungen mit persönlicher Menübelegung verwenden Format 9; ältere Apps lehnen sie ab. Ohne eigene Menübelegung bleibt die Version so niedrig wie bisher (4–8). Die Datenbank bleibt Version 4, vorhandene Fahrzeug- und Lagerdaten werden nicht umgewandelt. Die PDF-Anleitung wurde nicht geändert. Foto-/Produkterkennung und die erweiterte Teilehistorie sind nicht Bestandteil dieser Navigationsänderung.

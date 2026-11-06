@@ -4,7 +4,9 @@
 import {esc, fmt} from '../util.js';
 import {S, bikeList, bikeName} from '../state.js';
 import {bikeStatus, garageSummary, brandOf} from '../domain.js';
-import {$, imgTag, hydrate, icon} from '../ui.js';
+import {$, $$, imgTag, hydrate, icon, toast, errText} from '../ui.js';
+import * as store from '../store.js';
+import {flow} from '../ops.js';
 import {plateStyle, titleOf} from './bike.js';
 import {countText, fmtWhen} from '../backup.js';
 import {R} from '../registry.js';
@@ -66,9 +68,17 @@ export function renderHome(){
     el.innerHTML = parts.join('');
     return;
   }
+  if (S.ordering && bikes.length > 1) {
+    /* Neu zeichnen, ohne den Tastaturfokus zu verlieren */
+    const a = document.activeElement, keep = !focusAfter && a && el.contains(a) ? (a.dataset.handle ? '[data-handle="' + a.dataset.handle + '"]' : a.dataset.ordmv ? '[data-ordmv="' + a.dataset.ordmv + '"]' : a.id ? '#' + a.id : null) : null;
+    if (keep) focusAfter = keep;
+    el.innerHTML = orderHTML(bikes); restoreFocus(); return;
+  }
+  S.ordering = false;
   parts.push(summaryHTML(garageSummary()));
   parts.push('<h2 class="sr">Motorräder</h2><ul class="cards" id="bikeCards">' + bikes.map(bikeCard).join('') + '</ul>');
   parts.push('<section class="actions" aria-label="Aktionen"><button class="btn" type="button" id="addBikeBtn">' + icon('plus') + 'Motorrad hinzufügen</button>'
+    + (bikes.length > 1 ? '<button class="btn" type="button" id="orderBtn">' + icon('sort') + 'Reihenfolge ändern</button>' : '')
     + '<button class="btn primary" type="button" id="actRide">' + icon('rides') + 'Fahrt eintragen</button>'
     + '<button class="btn primary" type="button" id="actService">' + icon('wrench') + 'Wartung eintragen</button></section>');
   parts.push(backupNote());
@@ -90,11 +100,92 @@ function forBike(title, cb){
   const first = $('#pickList .pick'); if (first) first.focus();
 }
 
+/* ---------- Reihenfolge ändern (ab 1.2.0) ----------
+   Eigene Ansicht ohne Links (keine Karte öffnet sich versehentlich). Verschieben per Ziehgriff (Maus, Finger, Stift),
+   per Hoch-/Runter-Knopf oder per Pfeiltasten am Griff. Jede Verschiebung wird sofort gespeichert: nur das Feld order und
+   nur, wenn es im Speicher noch den Wert hat, auf dem die angezeigte Reihenfolge beruht (guard). Gleichzeitige Änderungen
+   in einem anderen Fenster oder ein inzwischen entferntes Motorrad überschreiben nichts. */
+let focusAfter = null;
+function orderHTML(bikes){
+  const busy = !!S.orderBusy, dis = busy ? ' disabled' : '';
+  return '<section class="card order" aria-labelledby="orderTitle"><div class="card-h"><h2 id="orderTitle">Reihenfolge ändern</h2><button class="btn primary" type="button" id="orderDone">Fertig</button></div>'
+    + '<p class="hint">Zieh ein Motorrad am Griff an die gewünschte Stelle oder nutz ▲ und ▼. Mit der Tastatur: Griff auswählen, dann Pfeiltaste hoch oder runter. Jede Änderung wird sofort gespeichert.</p>'
+    + '<ol class="order-list" id="orderList">' + bikes.map((b, i) => '<li class="order-row" data-oid="' + esc(b.id) + '" style="' + plateStyle(b) + '">'
+      + '<span class="handle" tabindex="0" role="button" data-handle="' + esc(b.id) + '" aria-label="' + esc(titleOf(b)) + ', Position ' + (i + 1) + ' von ' + bikes.length + '. Ziehen oder mit Pfeiltasten verschieben.">' + icon('grip') + '</span>'
+      + '<span class="order-name"><b>' + esc(titleOf(b)) + '</b>' + (b.nickname ? '<span class="hint"> ' + esc(bikeName(b)) + '</span>' : '') + '</span>'
+      + '<button class="mini" type="button" data-ordmv="' + esc(b.id) + ':-1" aria-label="' + esc(titleOf(b)) + ' nach oben"' + (i ? dis : ' disabled') + '>▲</button>'
+      + '<button class="mini" type="button" data-ordmv="' + esc(b.id) + ':1" aria-label="' + esc(titleOf(b)) + ' nach unten"' + (i < bikes.length - 1 ? dis : ' disabled') + '>▼</button></li>').join('') + '</ol>'
+    + '<p class="sr" aria-live="polite" id="orderLive">' + esc(S.orderMsg || '') + '</p></section>';
+}
+function restoreFocus(){
+  if (!focusAfter) return;
+  const sel = focusAfter; focusAfter = null;
+  const el = document.querySelector(sel) || document.querySelector(sel.replace(/:-?1"\]$/, ':' + (sel.includes(':-1') ? '1' : '-1') + '"]'));
+  if (el && !el.disabled) el.focus(); else { const h = document.querySelector('[data-handle]'); if (h) h.focus(); }
+}
+async function saveOrder(seq, focusSel){
+  const items = [];
+  seq.forEach((id, i) => { const raw = store.peek('bikes', id); if (!raw) return; const cur = raw.order === undefined ? null : raw.order; if (cur !== i) items.push({coll: 'bikes', id, patch: {order: i}, guard: {order: cur}}); });
+  if (!items.length) { renderHome(); return; }
+  S.orderBusy = true; focusAfter = focusSel || null; renderHome();
+  const r = await flow(() => store.commitR(items, null, 'reihenfolge', {epoch: S.epoch || ''}));
+  S.orderBusy = false;
+  if (r === 'ok') S.orderMsg = 'Reihenfolge gespeichert: ' + bikeList().map(titleOf).join(', ') + '.';
+  else if (r === 'fail' && S.lastErr && (S.lastErr.code === 'changed' || S.lastErr.code === 'not_found' || S.lastErr.code === 'orphan')) {
+    await store.reloadAll().catch(() => {});
+    S.orderMsg = '';
+    toast('Die Reihenfolge wurde inzwischen in einem anderen Fenster geändert oder ein Motorrad entfernt. Es wurde nichts gespeichert. Bitte prüf die aktuelle Reihenfolge.');
+  } else toast(r === 'fail' ? errText(S.lastErr) + ' Die Reihenfolge ist unverändert.' : 'Unklar, ob die Reihenfolge gespeichert wurde. Sie wird gleich neu angezeigt.');
+  focusAfter = focusSel || null;
+  renderHome();
+}
+function moveBike(id, d){
+  if (S.orderBusy) return;
+  const seq = bikeList().map(b => b.id), i = seq.indexOf(id), j = i + d;
+  if (i < 0 || j < 0 || j >= seq.length) return;
+  seq.splice(i, 1); seq.splice(j, 0, id);
+  saveOrder(seq, '[data-ordmv="' + id + ':' + d + '"]');
+}
+/* Ziehen am Griff (Pointer Events: Maus, Finger, Stift) */
+let drag = null;
+document.addEventListener('pointerdown', e => {
+  const h = e.target.closest && e.target.closest('[data-handle]'); if (!h || S.orderBusy || !S.ordering) return;
+  const row = h.closest('.order-row'), list = $('#orderList'); if (!row || !list) return;
+  e.preventDefault();
+  drag = {id: h.dataset.handle, row, list, pid: e.pointerId, moved: false};
+  try { h.setPointerCapture(e.pointerId); } catch (x) {}
+  row.classList.add('dragging');
+});
+document.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.pid) return;
+  e.preventDefault();
+  const rows = $$('.order-row', drag.list).filter(r => r !== drag.row);
+  const after = rows.find(r => { const b = r.getBoundingClientRect(); return e.clientY < b.top + b.height / 2; });
+  if (after) { if (after.previousElementSibling !== drag.row) { drag.list.insertBefore(drag.row, after); drag.moved = true; } }
+  else if (drag.list.lastElementChild !== drag.row) { drag.list.appendChild(drag.row); drag.moved = true; }
+});
+const endDrag = e => {
+  if (!drag || (e && e.pointerId !== drag.pid)) return;
+  const d = drag; drag = null;
+  d.row.classList.remove('dragging');
+  const seq = $$('.order-row', d.list).map(r => r.dataset.oid);
+  if (d.moved && e.type === 'pointerup') saveOrder(seq, '[data-handle="' + d.id + '"]'); else renderHome();
+};
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('pointercancel', endDrag);
+document.addEventListener('keydown', e => {
+  const h = e.target.closest && e.target.closest('[data-handle]'); if (!h || !S.ordering) return;
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); const id = h.dataset.handle, seq = bikeList().map(b => b.id), i = seq.indexOf(id), j = i + (e.key === 'ArrowUp' ? -1 : 1); if (j < 0 || j >= seq.length || S.orderBusy) return; seq.splice(i, 1); seq.splice(j, 0, id); saveOrder(seq, '[data-handle="' + id + '"]'); }
+});
+
 export function onClick(t, e){
-  if (t.dataset.bikecard) { e.preventDefault(); R.navigate({page: 'bike', bike: t.dataset.bikecard, section: 'status'}); return true; }
-  if (t.id === 'addBikeBtn') { R.navigate({page: 'add'}); return true; }
-  if (t.id === 'actRide') { forBike('Fahrt eintragen für …', id => { R.navigate({page: 'bike', bike: id, section: 'rides'}); R.openForm('rideDetails', 'rAmount'); }); return true; }
-  if (t.id === 'actService') { forBike('Wartung eintragen für …', id => { R.navigate({page: 'bike', bike: id, section: 'log'}); R.openForm('logDetails', 'lDate'); }); return true; }
+  if (t.id === 'orderBtn') { R.guard(() => { S.ordering = true; S.orderMsg = ''; renderHome(); const h = document.querySelector('[data-handle]'); if (h) h.focus(); }); return true; }
+  if (t.id === 'orderDone') { S.ordering = false; S.orderMsg = ''; renderHome(); const b = $('#orderBtn'); if (b) b.focus(); return true; }
+  if (t.dataset.ordmv) { const [id, d] = [t.dataset.ordmv.slice(0, t.dataset.ordmv.lastIndexOf(':')), Number(t.dataset.ordmv.slice(t.dataset.ordmv.lastIndexOf(':') + 1))]; moveBike(id, d); return true; }
+  if (t.dataset.bikecard) { e.preventDefault(); if (S.ordering) return true; R.go({page: 'bike', bike: t.dataset.bikecard, section: 'status'}); return true; }
+  if (t.id === 'addBikeBtn') { R.go({page: 'add'}); return true; }
+  if (t.id === 'actRide') { forBike('Fahrt eintragen für …', id => { R.guard(() => { R.navigate({page: 'bike', bike: id, section: 'rides'}); R.openForm('rideDetails', 'rAmount'); }); }); return true; }
+  if (t.id === 'actService') { forBike('Wartung eintragen für …', id => { R.guard(() => { R.navigate({page: 'bike', bike: id, section: 'log'}); R.openForm('logDetails', 'lDate'); }); }); return true; }
   if (t.id === 'migrateStart') { R.startMigration(); return true; }
   return false;
 }

@@ -3,17 +3,28 @@
    Keine Oberfläche und kein Speicherzugriff: liest nur den geladenen Zustand S. */
 import {esc, pad, str, fmt, eur, uid, clone, reEsc, validId, safeUrl, parseNum, num, turns, isISO, todayISO, dayNum,
   fromDayNum, shiftDate, addMonths, fmtDate, hexRgb, rgbHex, mixHex, lum, contrast, towards, onColor, canon, same, subOf} from './util.js';
+import {navigationOf} from './preferences.js';
 import {S, COLLS, bikeList, curBike, U, bikeName} from './state.js';
+import {parseWork, ivProposal, workPos, workEntry} from './work.js';
 export {COLLS};
 
 /* ---------- Konstanten ---------- */
-export const CHECK = ['Kette: Spannung & Schmierung','Speichen','Schrauben & Achsen','Bremsen & Beläge','Luftfilter sauber','Reifen & Luftdruck','Kühlflüssigkeit','Ölstand','Gaszug & Kupplung'];
+/* Checkliste „Vor der Fahrt“: Standardliste. Die IDs c0–c8 entsprechen den Positionen der festen Liste bis 1.1.2
+   (abgehakte Punkte des laufenden Tages werden darüber übernommen). „Gabel entlüften“ ist ab 1.2.0 dabei (c9).
+   Je Motorrad anpassbar (bikes.checklist); eine organisatorische Liste, keine Wartungsanweisung. */
+/* Höchstzahl der Punkte einer eigenen Checkliste (Oberfläche, Speichern und Einlesen gleich, ab 1.2.2) */
+export const CHECK_MAX = 40;
+export const CHECK = [{id: 'c0', name: 'Kette: Spannung & Schmierung'}, {id: 'c1', name: 'Speichen'}, {id: 'c2', name: 'Schrauben & Achsen'}, {id: 'c3', name: 'Bremsen & Beläge'},
+  {id: 'c4', name: 'Luftfilter sauber'}, {id: 'c5', name: 'Reifen & Luftdruck'}, {id: 'c6', name: 'Kühlflüssigkeit'}, {id: 'c7', name: 'Ölstand'}, {id: 'c8', name: 'Gaszug & Kupplung'}, {id: 'c9', name: 'Gabel entlüften'}];
+export const checkListOf = b => (b && Array.isArray(b.checklist)) ? b.checklist : CHECK;
 export const GROUNDS = ['hart','griffig','lehmig','sandig','steinig','wurzelig','schlammig','nass'];
 export const WEATHER = ['sonnig','bewölkt','Nieselregen','Regen','staubig','kalt','heiß'];
 export const FLUIDS = [['motor','Motoröl'],['fork','Gabelöl'],['coolant','Kühlflüssigkeit'],['brake','Bremsflüssigkeit'],['airfilter','Luftfilteröl'],['chain','Kettenspray']];
 export const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
 export const NUMW = {ein:1,eine:1,einer:1,einen:1,eins:1,zwei:2,drei:3,vier:4,'fünf':5,fuenf:5,sechs:6,sieben:7,acht:8,neun:9,zehn:10,elf:11,'zwölf':12,halbe:0.5,anderthalb:1.5,eineinhalb:1.5,zweieinhalb:2.5,dreieinhalb:3.5};
 export const LOG_KINDS = ['service','tire','chain','note','reading','meter'];
+/* Kategorien der Tätigkeiten (ab 1.2.0) */
+export const WORK_CATS = ['wartung', 'pflege', 'umbau', 'einstellung'];
 /* Rückfrage vor dem Speichern, wenn ein Stand um mehr als so viel über dem bisherigen liegt */
 export const JUMP = {h: 20, km: 2000};
 export const LIM = {h: {cnt: 100000, ride: 24}, km: {cnt: 9999999, ride: 3000}};
@@ -33,8 +44,14 @@ export const ZIP_FORMAT = 'racebook-backup';
    7 (ab 1.1.1) = zusätzlich ist bei einem Motorrad mit Zählerwechsel gespeichert, an welcher Stelle seines Tages ein
    Startwert oder eine Montage eingetragen wurde (Felder lastC bzw. c). 1.1.0 kennt diese Felder nicht und würde
    solche Angaben wieder dem Zähler am Tagesende zuordnen; deshalb lehnt es Version 7 als „neuer“ ab.
-   Ohne solche Einträge schreibt die App weiter Version 4, 5 bzw. 6. */
-export const ZIP_VERSION = 7;
+   8 (ab 1.2.0) = Tätigkeiten im Logbuch (Felder work, orig, edited), eigene Checkliste oder Favoriten je Motorrad
+   (Felder checklist, favs). 1.1.x kennt diese Felder nicht und würde sie beim Einlesen still verwerfen; deshalb lehnt es
+   Version 8 als „neuer“ ab.
+   Ab 1.3.0 Version 9, wenn eine eigene Menübelegung (navigation) gespeichert ist; 1.2.x lehnt Version 9 ab.
+   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7 bzw. 8. */
+export const ZIP_VERSION = 9;
+export const ZIP_VERSION_V8 = 8;
+export const ZIP_VERSION_POS = 7;
 export const ZIP_VERSION_METER = 6;
 export const ZIP_VERSION_ORPH = 5;
 export const ZIP_VERSION_PLAIN = 4;
@@ -46,6 +63,10 @@ export const needsV7 = next => {
   return Object.entries((next && next.bikes) || {}).some(([id, b]) => meterBikes.has(id) && b && (
     (b.items || []).some(it => it && it.lastC != null) || [b.tires && b.tires.front, b.tires && b.tires.rear, b.chain].some(x => x && x.c != null)));
 };
+/* Version 8: Angaben, die erst ab 1.2.0 gespeichert werden */
+export const hasV8Log = l => !!l && typeof l === 'object' && (l.work != null || l.orig != null || l.edited != null);
+export const hasV8Bike = b => !!b && typeof b === 'object' && (b.checklist != null || b.favs != null);
+export const needsV8 = next => Object.values((next && next.log) || {}).some(hasV8Log) || Object.values((next && next.bikes) || {}).some(hasV8Bike);
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
 const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
@@ -207,9 +228,26 @@ export function cleanBike(x, strict, where){
     color, order: h.n(x.order, 'Reihenfolge', {int:true, min:0, max:9999}), items, fluids,
     tires: {front: tire(tires.front, 'Reifen vorn'), rear: tire(tires.rear, 'Reifen hinten')},
     chain: withC({front: h.n(chain.front, 'Ritzel', {int:true, min:5, max:99}), rear: h.n(chain.rear, 'Kettenrad', {int:true, min:5, max:99}), brand: h.s(chain.brand, 'Kette', {max:120}), links: h.n(chain.links, 'Kettenglieder', {int:true, min:40, max:250}), at: h.n(chain.at, 'Kette Stand', {min:0, max:1e7}), date: h.d(chain.date, 'Kette Datum') || ''}, chain.c, 'Kette'),
+    ...cleanBikeV8(x, h),
     oem: {rows: h.a(oem.rows, 'Herstellervorgaben').filter(r => r && typeof r === 'object').slice(0, 50).map(r => ({when: h.s(r.when, 'Herstellervorgabe', {max:60}), what: h.s(r.what, 'Herstellervorgabe', {max:300})})), note: h.s(oem.note, 'Hinweis', {max:2000}), sourceTitle: h.s(oem.sourceTitle, 'Quelle', {max:200}), sourceUrl: safeUrl(oem.sourceUrl)},
     manual
   };
+}
+/* Ab 1.2.0, nur wenn vorhanden (bestehende Motorräder bleiben exakt gleich):
+   checklist = eigene Liste „Vor der Fahrt“ [{id, name}], favs = Lieblings-Tätigkeiten (IDs aus dem Katalog oder eigene) */
+function cleanBikeV8(x, h){
+  const o = {};
+  if (x.checklist != null) {
+    const seen = new Set();
+    o.checklist = h.a(x.checklist, 'Checkliste').slice(0, CHECK_MAX).map((c, i) => {
+      if (!c || typeof c !== 'object' || Array.isArray(c)) { h.fail('Checkliste ' + (i + 1), 'ist ungültig.'); return null; }
+      const id = h.id(c.id, 'Checkliste ' + (i + 1) + ' (ID)'), name = h.s(c.name, 'Checkliste ' + (i + 1), {req: true, max: 80});
+      if (!id || !name || seen.has(id)) { if (id && seen.has(id)) h.fail('Checkliste ' + (i + 1), 'kommt doppelt vor.'); return null; }
+      seen.add(id); return {id, name};
+    }).filter(Boolean);
+  }
+  if (x.favs != null) o.favs = Array.from(new Set(h.a(x.favs, 'Favoriten').filter(validId))).slice(0, 40);
+  return o;
 }
 export function cleanSnap(x, h){
   if (x == null) return null;
@@ -241,6 +279,16 @@ export function cleanDoc(coll, x, strict, where){
        automatisch berechneter Wert festgehalten ({how: 'festgehalten', from: Wert}); t = Zeitpunkt, op = Vorgang */
     if (d.kind === 'meter') { d.meterNew = h.n(x.meterNew, 'Neuer Zählerstand', {min:0, max:1e7}); if (d.meterNew == null) { h.fail('Neuer Zählerstand', 'fehlt.'); d.meterNew = 0; } }
     if (x.fix != null) { const fx = cleanFix(x.fix, h); if (fx) d.fix = fx; }
+    /* ab 1.2.0: work = tatsächlich erledigte Tätigkeiten [{id, name, cat, detail}] (getrennt von tasks = betroffene
+       Wartungsintervalle), orig = Originaleingabe des Schnell-Eintrags, edited = Zeitpunkt der letzten Bearbeitung */
+    if (x.work != null) d.work = h.a(x.work, 'Tätigkeiten').slice(0, 40).map((w, i) => {
+      if (!w || typeof w !== 'object' || Array.isArray(w)) { h.fail('Tätigkeit ' + (i + 1), 'ist ungültig.'); return null; }
+      const id = h.id(w.id, 'Tätigkeit ' + (i + 1) + ' (ID)'), name = h.s(w.name, 'Tätigkeit ' + (i + 1), {req: true, max: 120});
+      if (!id || !name) return null;
+      return {id, name, cat: h.one(w.cat, 'Tätigkeit ' + (i + 1) + ' (Kategorie)', WORK_CATS, 'wartung'), detail: h.s(w.detail, 'Tätigkeit ' + (i + 1) + ' (Angaben)', {max: 300})};
+    }).filter(Boolean);
+    if (x.orig != null) d.orig = h.s(x.orig, 'Originaleingabe', {max: 4000});
+    if (x.edited != null) { const t = h.n(x.edited, 'Bearbeitet', {int: true, min: 0}); if (t != null) d.edited = t; }
     return d;
   }
   if (coll === 'rides') return {bike, date: h.d(x.date, 'Datum', {req:true}) || '', track: h.s(x.track, 'Strecke', {max:120}),
@@ -472,6 +520,9 @@ export function serviceDoc(b, o){
   const sa = serviceAt(b, o.date, o.at);
   const d = {bike: b.id, kind: 'service', date: o.date, at: sa.at, atAuto: sa.atAuto, tasks, taskNames: tasks.map(id => items.find(i => i.id === id).name),
     extra: o.extra || '', cost: o.cost == null ? null : o.cost, note: o.note || '', created: o.created || Date.now()};
+  /* ab 1.2.0, nur wenn benutzt: erledigte Tätigkeiten und Originaleingabe */
+  if (o.work && o.work.length) d.work = o.work.map(w => workEntry(w.id, w.name, w.detail, w.cat));
+  if (o.orig && o.orig !== d.extra && o.orig !== d.note) d.orig = o.orig;
   if (o.photo) { d.photoId = o.photo.id; d.thumbId = o.photo.thumbId || ''; }
   return canonDoc('log', d);
 }
@@ -493,7 +544,7 @@ export const B = '(?<![\\wäöüß])', E = '(?![\\wäöüß])';
 export const NUM_TOK = '([-+−]?(?:\\d[\\d.,]*\\d|\\d)|' + Object.keys(NUMW).sort((a, b) => b.length - a.length).join('|') + ')';
 export function tokNum(tok){ const w = NUMW[tok.toLowerCase()]; if (w != null) return {ok: true, value: w}; return parseNum(tok.replace('−', '-')); }
 export const RIDE_RE = /(gefahren|fahrt|training|trainiert|runden|unterwegs|session|ausfahrt)/;
-export const DONE_RE = /(gewechselt|getauscht|gemacht|repariert|eingebaut|erneuert|gereinigt|geprüft|geprueft|eingestellt|nachgefüllt|nachgefuellt|geschmiert|gespannt|entlüftet|entlueftet|neu drauf|neue)/;
+export const DONE_RE = /(gewechselt|getauscht|ausgetauscht|ersetzt|gemacht|repariert|eingebaut|erneuert|gereinigt|geputzt|geprüft|geprueft|kontrolliert|gecheckt|eingestellt|abgestimmt|nachgefüllt|nachgefuellt|geschmiert|gefettet|gespannt|entlüftet|entlueftet|nachgezogen|montiert|angebaut|aufgezogen|gewaschen|neu drauf|neue)/;
 export const NEG_RE = new RegExp(B + '(nicht|kein|keine|keinen|keiner|nie|noch nicht)' + E);
 export const PLAN_RE = new RegExp(B + '(muss|müsste|muesste|sollte|sollten|bald|demnächst|demnaechst|morgen|übermorgen|geplant|planen|vorhaben|bestellen|erinnere|erinnern)' + E + '|nächste woche|naechste woche');
 
@@ -522,11 +573,12 @@ function coreParse(text, ctx, opts){
     if (m[1]) { if (v <= lim.cnt) at = v; else problems.push('Der Stand „' + m[2] + '“ ist zu groß'); }
     else if (amount == null && v > 0) amount = v;
   }
-  const tasks = []; let iTask = -1;
-  (b.items || []).forEach(it => {
-    const kws = (it.kw && it.kw.length) ? it.kw : [String(it.name).toLowerCase()];
-    kws.forEach(k => { const i = t.search(new RegExp(B + reEsc(k))); if (i >= 0) { if (!tasks.includes(it.id)) tasks.push(it.id); if (iTask < 0 || i < iTask) iTask = i; } });
-  });
+  /* Ab 1.2.0: erledigte Tätigkeiten aus dem Katalog (work.js) und getrennt davon die betroffenen Wartungsintervalle.
+     Ein Intervall ist nur vorausgewählt, wenn die Tätigkeiten es vollständig abdecken; Stichwörter allein reichen nicht. */
+  const wk0 = parseWork(text);
+  /* Bloße Gegenstände ohne Tätigkeitswort zählen nur bei ausdrücklicher Wartung („Wartung: Luftfilter“) oder Erledigt-Wort */
+  const wk = (wk0.acted || opts.service || DONE_RE.test(t)) ? wk0 : {works: [], open: []}, iv = ivProposal(b, wk.works, wk.open);
+  const tasks = iv.filter(p => p.pre).map(p => p.item), iTask = workPos(text);
   const base = {bike, date, at: null, amount: null, tasks: [], extra: '', cost: null, track: null, note: text.trim()};
   /* Verneint oder geplant: nichts als erledigt behaupten */
   if (!opts.keepNeg && (NEG_RE.test(t) || PLAN_RE.test(t))) {
@@ -536,10 +588,12 @@ function coreParse(text, ctx, opts){
   const rideWords = iRide >= 0, done = iDone >= 0;
   let track = null; const tm = text.match(/(?:\bin|\bauf|\bim|\bbei)\s+([A-ZÄÖÜ][\wäöüßÄÖÜ-]+(?:\s[A-ZÄÖÜ][\wäöüßÄÖÜ-]+)?)/);
   if (tm && !bikeList().some(x => [x.brand, x.short, shortName(x), x.model].filter(Boolean).some(w => String(w).toLowerCase() === tm[1].toLowerCase()))) track = tm[1];
-  const isService = tasks.length > 0 || done;
+  const isService = wk.works.length > 0 || wk.open.length > 0 || tasks.length > 0 || done;
   const isRide = rideWords && amount != null && amount <= lim.ride;
   const entries = [];
-  const svc = () => Object.assign({}, base, {kind: 'service', at: at != null ? at : (!isRide && !rideWords && amount != null && amount <= lim.cnt ? amount : null), tasks, extra: tasks.length ? '' : text.trim(), cost});
+  /* Wartung: Tätigkeiten, offene Fragen und Intervallvorschlag; der eingegebene Text bleibt als Originaleingabe (orig),
+     nicht noch einmal als Notiz. Ohne erkannte Tätigkeit bleibt er wie bisher als „Weitere Arbeiten“ (extra). */
+  const svc = () => { const known = wk.works.length || wk.open.length; return Object.assign({}, base, {kind: 'service', at: at != null ? at : (!isRide && !rideWords && amount != null && amount <= lim.cnt ? amount : null), tasks: tasks.slice(), work: wk.works.map(w => Object.assign({}, w)), open: wk.open.map(q => Object.assign({}, q, {options: q.options.slice()})), extra: known ? '' : text.trim(), orig: known ? text.trim() : '', note: '', cost}); };
   if (isService && isRide) {
     /* Reihenfolge wie im Text; „vorher/davor/zuvor“ dreht sie um. Die Vorschau zeigt sie und lässt sie tauschen. */
     const iSvc = [iTask, iDone].filter(i => i >= 0).reduce((a, i) => Math.min(a, i), Infinity);
@@ -551,13 +605,14 @@ function coreParse(text, ctx, opts){
   else if (isRide) entries.push(Object.assign({}, base, {kind: 'ride', amount, track}));
   if (!entries.length) {
     if (rideWords || (amount != null && amount <= lim.ride)) entries.push(Object.assign({}, base, {kind: 'ride', amount: amount != null && amount <= lim.ride ? amount : null, track}));
-    else if (cost != null) entries.push(Object.assign({}, base, {kind: 'service', at, extra: text.trim(), cost}));
+    else if (cost != null) entries.push(Object.assign({}, base, {kind: 'service', at, extra: text.trim(), note: '', work: [], open: [], cost}));
     else entries.push(Object.assign({}, base, {kind: 'note', at, cost}));
   }
   const warn = [];
   if (problems.length) warn.push(problems.join('. ') + '. Bitte prüfen und gegebenenfalls über „Bearbeiten“ korrigieren.');
   if (entries.length > 1) warn.push('Ich habe zwei Tätigkeiten erkannt und in dieser Reihenfolge vorbereitet. Prüf beide.');
-  else if (entries[0].kind === 'service' && !entries[0].tasks.length) warn.push('Keinem Wartungspunkt zugeordnet. Tipp auf „Bearbeiten“, um ihn auszuwählen.');
+  else if (entries[0].kind === 'service' && entries[0].open && entries[0].open.length) warn.push('Bitte bei ' + entries[0].open.map(q => '„' + q.label + '“').join(', ') + ' auswählen, was gemacht wurde.');
+  else if (entries[0].kind === 'service' && !entries[0].tasks.length && !(entries[0].work || []).length) warn.push('Keinem Wartungspunkt zugeordnet. Tipp auf „Bearbeiten“, um ihn auszuwählen.');
   if (entries.some(x => x.kind === 'ride' && x.amount == null)) warn.push('Bei der Fahrt fehlt eine gültige Fahrzeit.');
   return {entries, warn: warn.join(' ')};
 }
@@ -687,6 +742,13 @@ function readingEntry(rest, ctx){
   return {e, problem: ''};
 }
 const withBase = (ctx, text) => ({bike: ctx.b.id, date: ctx.date, at: null, amount: null, tasks: [], extra: '', cost: null, track: null, note: text.trim()});
+/* Den ganzen eingegebenen Text behalten: bei einer Wartung als Originaleingabe (einklappbar, nicht als Notiz und nicht
+   doppelt), sonst als Notiz wie bisher */
+function keepText(x, text){
+  if (x.kind !== 'service') { x.note = text.trim(); return; }
+  x.note = '';
+  x.orig = x.extra === text.trim() ? '' : text.trim();
+}
 
 export function localParse(text){
   const ctx = parseCtx(text);
@@ -723,10 +785,10 @@ export function localParse(text){
       return {entries: es, warn: 'Trotz „' + cmd.word + '“ keine erledigte ' + (k === 'ride' ? 'Fahrt' : 'Wartung') + ': Der Text klingt verneint oder geplant („nicht“, „morgen“ …). '
         + (asDefect ? (es.length > 1 ? 'Ich lege offene Mängel an.' : 'Ich lege es als offenen Mangel an.') : 'Ich schlage es als Notiz vor.') + ' Ist es doch erledigt, tipp auf „Bearbeiten“.', cmd: k};
     }
-    const r = coreParse(rest || text, ctx, {keepNeg: true});
+    const r = coreParse(rest || text, ctx, {keepNeg: true, service: k === 'service'});
     let es = r.entries.filter(x => x.kind === k);
-    if (!es.length) es = [Object.assign(withBase(ctx, text), k === 'ride' ? {kind: 'ride'} : {kind: 'service', extra: rest || text.trim()})];
-    es.forEach(x => { x.note = text.trim(); });
+    if (!es.length) es = [Object.assign(withBase(ctx, text), k === 'ride' ? {kind: 'ride'} : {kind: 'service', extra: rest || text.trim(), work: [], open: []})];
+    es.forEach(x => keepText(x, text));
     let w = r.warn;
     if (k === 'ride' && es.some(x => x.amount == null) && !/fehlt eine gültige Fahrzeit/.test(w)) w = (w ? w + ' ' : '') + 'Bei der Fahrt fehlt eine gültige Fahrzeit.';
     return {entries: es, warn: w, cmd: k};
@@ -748,7 +810,7 @@ function naturalParse(text, ctx, full){
     if (others.length) {
       const r = coreParse(others.join(', '), ctx, {});
       r.entries.forEach(x => {
-        x.note = full.trim();
+        keepText(x, full);
         if (x.kind === 'ride' && x.amount != null) entries.push(x);
         else if (x.kind === 'service' && (x.tasks.length || DONE_RE.test(lc(others.join(' '))))) entries.push(x);
       });
@@ -864,7 +926,7 @@ export function validateV8Backup(d){
     if (d.version > V8_BACKUP_VERSION) throw new Error('Die Sicherung stammt aus einer neueren Racebook-Version (' + d.version + ') und kann hier nicht gelesen werden.');
   }
   if (!Array.isArray(d.motorraeder)) throw new Error('In der Sicherung fehlen die Motorräder.');
-  if ((Array.isArray(d.logbuch) ? d.logbuch : []).some(l => l && typeof l === 'object' && (l.kind === 'meter' || l.fix != null))) throw new Error('Die Sicherung ist beschädigt (unbekannte Einträge im Logbuch).');
+  if ((Array.isArray(d.logbuch) ? d.logbuch : []).some(l => l && typeof l === 'object' && (l.kind === 'meter' || l.fix != null || hasV8Log(l)))) throw new Error('Die Sicherung ist beschädigt (unbekannte Einträge im Logbuch).');
   const missing = [];
   const arr = v => Array.isArray(v) ? v.map(x => (x && typeof x === 'object' && !Array.isArray(x)) ? Object.assign({}, x) : x) : v;
   const map = {bikes: arr(d.motorraeder), log: arr(d.logbuch), rides: arr(d.fahrten), setups: arr(d.fahrwerk), parts: arr(d.teile), defects: []};
@@ -903,6 +965,9 @@ export function validateZipJson(d){
   if (d.version < 5 && d.verwaist != null) throw new Error('Die Sicherung ist beschädigt (unerwarteter Teil „verwaist“).');
   const logs = [].concat(Array.isArray(d.logbuch) ? d.logbuch : [], d.verwaist && Array.isArray(d.verwaist.logbuch) ? d.verwaist.logbuch : []);
   if (d.version < 6 && logs.some(l => l && typeof l === 'object' && (l.kind === 'meter' || l.fix != null))) throw new Error('Die Sicherung ist beschädigt (Zählerwechsel oder Berichtigungen in einer Sicherung vor Version 6).');
+  if (d.version < 8 && (logs.some(hasV8Log) || (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV8Bike))) throw new Error('Die Sicherung ist beschädigt (Tätigkeiten, Checkliste oder Favoriten in einer Sicherung vor Version 8).');
+  if (d.version < 9 && d.navigation != null) throw new Error('Menübelegung in einer Sicherung vor Version 9.');
+  const navigation = navigationOf(d.navigation);
   const map = {}; COLLS.forEach(k => { map[k] = d[KEYS[k]]; });
   const next = strictCollections(map);
   const orphans = strictOrphans(d.verwaist, next);
@@ -929,7 +994,7 @@ export function validateZipJson(d){
   fileRefs(all).forEach((what, id) => { if (seen.has(id)) needed.add(id); else if (known.has(id)) missing.push(what); else broken.push(what); });
   if (broken.length) throw new Error('In der Sicherung fehlen Anhänge: ' + broken.join('; ') + '.');
   const meta = d.stand && typeof d.stand === 'object' ? d.stand : {};
-  return {next, orphans, missing, files: files.filter(f => needed.has(f.id)), needed, source: 'zip', version: d.version,
+  return {next, navigation, orphans, missing, files: files.filter(f => needed.has(f.id)), needed, source: 'zip', version: d.version,
     exported: typeof d.exportiert === 'string' ? d.exportiert : '', changeSeq: Number.isInteger(meta.changeSeq) ? meta.changeSeq : null};
 }
 

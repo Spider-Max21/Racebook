@@ -14,6 +14,8 @@ import * as defects from './views/defects.js';
 import * as home from './views/home.js';
 import * as data from './views/data.js';
 import * as counter from './views/counter.js';
+import * as drafts from './drafts.js';
+import * as nav from './navigation.js';
 
 /* ---------- Darstellung ---------- */
 function applyTheme(){
@@ -25,10 +27,10 @@ function applyTheme(){
 applyTheme();
 
 /* ---------- Seiten ---------- */
-const PAGES = ['home', 'bike', 'data', 'help', 'add', 'error'];
+const PAGES = ['home', 'bike', 'inventory', 'navigation', 'data', 'help', 'add', 'error'];
 function showPage(p){
   PAGES.forEach(x => { const el = $('#v-' + x); if (el) el.hidden = x !== p; });
-  $('#tabs').hidden = p !== 'bike';
+  $('#tabs').hidden = p === 'error';
   document.body.dataset.page = p;
 }
 /* Kopfleiste und Bereichsleiste an die tatsächliche Schrift anpassen. Geräte haben unterschiedliche Schriften
@@ -71,11 +73,11 @@ function renderChrome(){
   $('#backBtn').setAttribute('aria-label', 'Zurück');
   $('#homeLink').hidden = p !== 'home' && p !== 'error';
   const title = $('#barTitle');
-  const t = p === 'bike' && b ? bike.titleOf(b) : p === 'data' ? 'Daten & Sicherung' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
+  const t = p === 'bike' && b ? bike.titleOf(b) : p === 'data' ? 'Einstellungen' : p === 'inventory' ? 'Lager' : p === 'navigation' ? 'Menü anpassen' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
   title.hidden = !t;
   title.innerHTML = t ? '<span class="bt-main">' + escHTML(t) + '</span>' + (p === 'bike' && b && b.nickname ? '<span class="bt-sub">' + escHTML((b.brand + ' ' + (b.model || '')).trim()) + '</span>' : '') : '';
   const chip = $('#backupChip');
-  const has = bikeList().length > 0 && S.mode === 'ready';
+  const has = (bikeList().length > 0 || S.parts.length > 0 || !!S.navigation) && S.mode === 'ready';
   chip.hidden = !has || p === 'data';
   if (has) {
     const n = (S.changeSeq || 0) - (S.backup ? S.backup.seq || 0 : 0);
@@ -85,6 +87,7 @@ function renderChrome(){
     chip.setAttribute('aria-label', 'Daten und Sicherung: ' + (!S.backup ? 'noch keine Sicherung erstellt' : n > 0 ? n + ' Änderungen seit der letzten Sicherung' : 'seit der letzten Sicherung keine Änderungen'));
   }
   if (p === 'bike') $$('.tab').forEach(x => x.setAttribute('aria-current', x.dataset.v === S.section ? 'page' : 'false'));
+  nav.renderNavigation();
   document.title = t ? t + ' – Racebook' : 'Racebook';
   fitBars();
 }
@@ -154,6 +157,7 @@ function onDatasetChange(phase){
     bike.closeDraft('partForm');
     if (S.adding || S.addPhoto) bike.closeDraft('addBikeForm');
     S.shareReady = null; S.oemDraft = null; S.editing = {};
+    nav.resetEditor();
     resetInfo.unres = dropForeignUnres();
     return;
   }
@@ -177,9 +181,12 @@ function renderAll(){
   const p = R.route.page;
   if (p === 'home') home.renderHome();
   if (p === 'bike' && curBike()) { bike.renderBike(); defects.renderDefects(); }
+  if (S.mode === 'ready') bike.renderInventory();
+  if (p === 'navigation') nav.renderEditor();
   if (p === 'data') data.renderData();
   if (p === 'add') bike.renderAddBike();
   counter.onRender();
+  drafts.settle();
 }
 
 /* ---------- Navigation (Zurück-Geste von Android führt zur Übersicht) ---------- */
@@ -211,17 +218,34 @@ function navigate(r, opts){
 }
 /* Zur Garage (Übersicht aller Motorräder). Sie liegt immer ganz unten im Verlauf (rb 0, siehe Start); dorthin
    zurückspringen, damit die Zurück-Geste danach nicht wieder in ein Motorrad führt. */
+let popSkip = false;
 function toGarage(){
   const depth = (history.state && history.state.rb) || 0;
-  if (depth > 0) { try { history.go(-depth); return; } catch (e) {} }
+  if (depth > 0) { try { popSkip = true; history.go(-depth); return; } catch (e) { popSkip = false; } }
   navigate({page: 'home'}, {replace: true});
 }
 function goBack(){
-  if (history.state && history.state.rb > 0) history.back();
+  if (history.state && history.state.rb > 0) { popSkip = true; history.back(); }
   else navigate({page: 'home'}, {replace: true});
 }
-window.addEventListener('popstate', () => { const r = parseRoute(); if (routeHash(r) !== routeHash(R.route)) applyRoute(r); });
-window.addEventListener('hashchange', () => { const r = parseRoute(); if (routeHash(r) !== routeHash(R.route)) applyRoute(r); });
+/* Vom Nutzer ausgelöster Wechsel: bei ungespeicherten Eingaben erst nachfragen (ab 1.2.0) */
+const go = (r, opts) => drafts.guard(() => navigate(r, opts));
+/* Zurück-Geste oder Zurück im Browser: Der Browser hat schon gewechselt. Bei ungespeicherten Eingaben die bisherige Seite
+   wiederherstellen und nachfragen; erst bei „Speichern“ (erfolgreich) oder „Verwerfen“ wirklich zurück. */
+function onPop(){
+  const r = parseRoute();
+  if (routeHash(r) === routeHash(R.route)) { popSkip = false; return; }
+  if (popSkip) { popSkip = false; applyRoute(r); return; }
+  if (S.mode === 'ready' && !(window.__T && window.__T.leaveAuto === 'bypass') && (drafts.dirtyKeys().length || drafts.busySaving())) {
+    const depth = (history.state && history.state.rb) || 0;
+    try { history.pushState({rb: depth + 1}, '', routeHash(R.route)); } catch (e) {}
+    drafts.guard(() => { popSkip = true; history.back(); });
+    return;
+  }
+  applyRoute(r);
+}
+window.addEventListener('popstate', onPop);
+window.addEventListener('hashchange', onPop);
 
 function openForm(detailsId, focusId){
   const d = document.getElementById(detailsId); if (d) d.open = true;
@@ -231,7 +255,7 @@ function openForm(detailsId, focusId){
 
 /* ---------- Registrieren ---------- */
 Object.assign(R, {
-  renderAll, renderSys, navigate, applyTheme, openForm,
+  renderAll, renderSys, navigate, go, guard: drafts.guard, submitForm, applyTheme, openForm, toGarage: () => drafts.guard(() => toGarage()),
   setBike: id => { if (bike.setBike(id)) navigate({page: 'bike', bike: id, section: S.section || 'status'}); },
   closeDraft: k => bike.closeDraft(k),
   closeDefectDraft: k => defects.closeDefectDraft(k),
@@ -264,18 +288,32 @@ function onData(key, arr){
 let renderQ = 0;
 function scheduleRender(){ if (renderQ) return; renderQ = requestAnimationFrame(() => { renderQ = 0; renderAll(); }); }
 let metaQ = 0;
-DB.onChange(() => { clearTimeout(metaQ); metaQ = setTimeout(() => data.refreshMeta().then(scheduleRender), 30); });
+DB.onChange(() => { clearTimeout(metaQ); metaQ = setTimeout(() => Promise.all([data.refreshMeta(), nav.refreshPreferences()]).then(scheduleRender), 30); });
 
 /* ---------- Ereignisse ---------- */
+/* Ein weiteres Formular aufklappen = neuer Bearbeitungsvorgang: bei ungespeicherten Eingaben in einem anderen erst fragen */
+const DETAILS_DRAFT = {logDetails: 'log', rideDetails: 'ride', setupDetails: 'setup', defectDetails: 'defect', 'g-meter': 'meter'};
+document.addEventListener('click', e => {
+  const sum = e.target.closest && e.target.closest('summary');
+  const det = sum && sum.parentElement;
+  if (!det || det.tagName !== 'DETAILS' || det.open || !det.classList.contains('form-card')) return;
+  const key = DETAILS_DRAFT[det.id] || (det.querySelector('#partForm') ? 'part' : null);
+  if (window.__T && window.__T.leaveAuto === 'bypass') return;
+  /* Unverändert offene andere Formulare schließen (ab 1.2.1: ein Vorgang) */
+  if (!drafts.dirtyKeys(key ? [key] : null).length && !drafts.busySaving()) { drafts.closeIdle(key ? [key] : []); return; }
+  e.preventDefault();
+  drafts.begin(() => { det.open = true; }, key ? [key] : []);
+}, true);
 document.addEventListener('click', async e => {
   const t = e.target.closest('button, a[data-bikecard], a[data-nav], a[data-filehref], a[data-skip]'); if (!t) return;
+  if (await nav.onClick(t)) return;
   if (t.dataset.skip) { e.preventDefault(); $('#main').focus(); return; }
   if (t.matches('a[data-filehref]')) { if (t.getAttribute('aria-disabled') === 'true') e.preventDefault(); return; }
-  if (t.dataset.nav) { e.preventDefault(); navigate({page: t.dataset.nav}); return; }
+  if (t.dataset.nav) { e.preventDefault(); go({page: t.dataset.nav}); return; }
   if (t.disabled) return;
-  if (t.id === 'backBtn') { if (R.route.page === 'bike') toGarage(); else goBack(); return; }
-  if (t.id === 'garageBtn') { toGarage(); return; }
-  if (t.id === 'backupChip') { navigate({page: 'data'}); return; }
+  if (t.id === 'backBtn') { drafts.guard(() => { if (R.route.page === 'bike') toGarage(); else goBack(); }); return; }
+  if (t.id === 'garageBtn') { drafts.guard(() => toGarage()); return; }
+  if (t.id === 'backupChip') { go({page: 'data'}); return; }
   if (t.id === 'reloadBtn') { location.reload(); return; }
   if (t.id === 'replacedOk') { S.replaced = null; renderSys(); return; }
   if (t.id === 'unresCheck') { t.disabled = true; await checkUnres(); renderSys(); return; }
@@ -291,24 +329,34 @@ document.addEventListener('click', async e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.getAttribute && t.getAttribute('aria-invalid')) t.removeAttribute('aria-invalid');
+  if (t.id === 'inventorySearch') { bike.renderInventory(); return; }
+  nav.onInput(t);
   defects.onInput(t) || bike.onInput(t);
 });
-document.addEventListener('change', e => { const t = e.target; defects.onChange(t) || data.onChange(t) || bike.onChange(t); });
-document.addEventListener('submit', async e => {
+document.addEventListener('change', e => { const t = e.target; if (nav.onChange(t)) return; if (t.id === 'inventoryBike' || t.id === 'inventoryLow') { bike.renderInventory(); return; } defects.onChange(t) || data.onChange(t) || bike.onChange(t); });
+document.addEventListener('submit', e => {
   const f = e.target;
   if (f.id === 'quickForm') { bike.onQuick(e); return; }
   e.preventDefault();
+  submitForm(f);
+});
+/* Formular speichern (auch aus „Du hast ungespeicherte Änderungen.“ → Speichern). Ergebnis: true = ohne Prüffehler durchgelaufen */
+async function submitForm(f){
   const btn = f.querySelector('button[type="submit"]');
-  if (btn && btn.disabled) return;
+  if (btn && btn.disabled) return false;
   const busy = on => { if (btn) btn.disabled = on; };
   try {
-    if (await defects.onSubmit(f, busy)) return;
-    await bike.onSubmit(f, busy);
+    return await drafts.savingRun(async () => {
+      if (f.id === 'navigationForm') return nav.saveEditor();
+      if (await defects.onSubmit(f, busy)) return true;
+      await bike.onSubmit(f, busy);
+      return true;
+    });
   } catch (err) {
-    if (err instanceof VErr) { showVErr(err); return; }
+    if (err instanceof VErr) { showVErr(err); return false; }
     throw err;
   } finally { busy(false); }
-});
+}
 $('#lightbox').addEventListener('close', () => { $('#lbImg').removeAttribute('src'); });
 
 /* ---------- App-Aktualisierung (Service Worker) ---------- */
@@ -336,11 +384,9 @@ function applyUpdate(){
 
 /* ---------- Start ---------- */
 function initStatic(){
-  /* Kurzform nur auf sehr schmalen Bildschirmen; der vorgelesene Name bleibt vollständig */
-  $('#tabsIn').innerHTML = SECTIONS.map(([v, l, full, short]) => '<button class="tab" type="button" data-v="' + v + '" aria-current="false"' + (full || short ? ' aria-label="' + (full || l) + '"' : '') + '>' + icon(v)
-    + (short ? '<span class="l-long">' + l + '</span><span class="l-short" aria-hidden="true">' + short + '</span>' : '<span>' + l + '</span>') + '</button>').join('');
+  nav.initNavigation();
   $$('form').forEach(f => f.setAttribute('novalidate', ''));
-  bike.initBikeForms(); counter.initCounter();
+  bike.initBikeForms(); counter.initCounter(); drafts.initDrafts(); defects.registerDefectDrafts();
   bike.resetBikeForms();
 }
 async function boot(){
@@ -372,6 +418,7 @@ async function boot(){
   const gone = dropForeignUnres();
   if (gone) setTimeout(() => toast(gone === 1 ? 'Ein ungeklärter Speicherversuch gehörte zu einem inzwischen ersetzten Datenbestand und wurde verworfen.' : gone + ' ungeklärte Speicherversuche gehörten zu einem inzwischen ersetzten Datenbestand und wurden verworfen.'), 400);
   await data.refreshMeta();
+  await nav.refreshPreferences();
   S.v8 = readV8Local();
   store.emitAll();
   if (!S.bikes[S.bike]) { const b = bikeList()[0]; S.bike = b ? b.id : ''; }
@@ -388,6 +435,6 @@ if (window.__RACEBOOK_TEST__) {
   import('./domain.js').then(D => import('./util.js').then(Ut => {
     window.__RB = {S, derive, parseNum: Ut.parseNum, addMonths: Ut.addMonths, localParse: D.localParse, validateV8Backup: D.validateV8Backup,
       turns: Ut.turns, curOf: D.curOf, itemState: D.itemState, valueAt: D.valueAt, svcAtOf: D.svcAtOf, bikeStatus: D.bikeStatus, garageSummary: D.garageSummary,
-      navigate, DB, store, bumpGen, parkOp, orphanCount};
+      navigate, DB, store, bumpGen, parkOp, orphanCount, drafts};
   }));
 }

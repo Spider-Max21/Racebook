@@ -3,7 +3,7 @@
      (alle Eingabewege; Vergleich mit dem Stand an der Stelle des Eintrags, rückwirkende Einträge also mit damals)
    - Tippfehler berichtigen: Vorschau mit allen betroffenen Einträgen und den Auswirkungen auf die Wartung;
      gespeichert wird alles in einem Vorgang, nur wenn sich der Stand des Motorrads seit der Vorschau nicht geändert hat
-   - Zählerwechsel unter Technik → Stundenzähler (Kilometerzähler): Anzeige und Gesamtlaufleistung getrennt */
+   - Zählerwechsel unter Fahrzeugdaten → Stundenzähler (Kilometerzähler): Anzeige und Gesamtlaufleistung getrennt */
 import {esc, fmt, uid, v2, todayISO, fmtDate} from '../util.js';
 import {S, U} from '../state.js';
 import {LIM, derive, curOf, totOf, offOf, posAt, jumpText, fixPlan, fixResult, fixCandidate, canonDoc, meterSegments} from '../domain.js';
@@ -159,7 +159,7 @@ function renderFix(full){
         + (p.rows.length ? '<h3>Betroffene Einträge</h3><p class="hint">Automatisch berechnete Werte sind vorausgewählt. Bei eingetippten oder unklaren Werten entscheidest du selbst.</p><div class="fix-list">' + p.rows.map(r => rowHTML(b, r)).join('') + '</div>'
           : '<p class="hint">Keine Wartung hängt von dieser Ablesung ab.</p>')
         + '<h3>Auswirkungen auf die Wartung</h3><ul class="fix-effects" id="fixEffects"></ul>'
-        + '<p class="hint fix-meter">Wurde der ' + meterName(b) + ' ausgetauscht? Das ist kein Tippfehler. Trag den Wechsel unter <button class="link inline" type="button" id="fixMeter">Technik → ' + meterName(b) + '</button> ein.</p>';
+        + '<p class="hint fix-meter">Wurde der ' + meterName(b) + ' ausgetauscht? Das ist kein Tippfehler. Trag den Wechsel unter <button class="link inline" type="button" id="fixMeter">Fahrzeugdaten → ' + meterName(b) + '</button> ein.</p>';
     }
   }
   const pending = store.pendingFor(b.id);
@@ -259,7 +259,7 @@ function finish(b){
   R.renderAll();
 }
 
-/* ---------- Zählerwechsel (Technik → Stundenzähler) ---------- */
+/* ---------- Zählerwechsel (Fahrzeugdaten → Stundenzähler) ---------- */
 export function renderMeter(b){
   const el = $('#meterInfo'); if (!el || !b) return;
   const name = meterName(b), cur = curOf(b), tot = totOf(b), off = offOf(b);
@@ -323,7 +323,9 @@ export function initCounter(){
   dlg.addEventListener('click', e => {
     const t = e.target.closest('#fixMeter'); if (!t || !F || F.busy) return;
     const bid = F.plan.bike; closeFix();
-    R.navigate({page: 'bike', bike: bid, section: 'garage'});
-    const m = $('#g-meter'); if (m) { m.open = true; requestAnimationFrame(() => m.scrollIntoView({block: 'start', behavior: 'smooth'})); }
+    R.guard(() => {
+      R.navigate({page: 'bike', bike: bid, section: 'vehicle'});
+      const m = $('#g-meter'); if (m) { m.open = true; requestAnimationFrame(() => m.scrollIntoView({block: 'start', behavior: 'smooth'})); }
+    });
   });
 }
