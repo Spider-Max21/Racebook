@@ -6,6 +6,8 @@ export const fmt = (n, d) => (n == null || isNaN(n)) ? '–' : Number(n).toLocal
 export const eur = n => (n == null || isNaN(n)) ? '–' : Number(n).toLocaleString('de-DE', {style:'currency', currency:'EUR'});
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 export const clone = o => JSON.parse(JSON.stringify(o));
+/* Ab 1.5.0: höchstens so viele Einkäufe je Lagerartikel (wird beim Speichern durchgesetzt, nie still gekürzt) */
+export const MAX_BUYS = 2000;
 export const v2 = v => v == null ? '' : String(v).replace('.', ',');
 export const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export const ID_RE = /^[A-Za-z0-9_\-.~:@+]{1,200}$/;

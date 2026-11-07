@@ -202,7 +202,7 @@ async function adjustR(id, op, spec, ep){
   if (f && !f.after) { S.lastErr = {code: 'unavailable'}; return check(); }
   /* Ab 1.4.0 mit Dateien (neues Artikelbild) in derselben Transaktion */
   const ops = (Array.isArray(spec.files) ? spec.files : []).map(x => ({store: 'files', type: 'put', value: x})).concat([{store: coll, type: 'adjust', id, op, add: Math.round(Number(spec.add) || 0), low: !!spec.low, set: spec.set && Object.keys(spec.set).length ? clone(spec.set) : null,
-    guard: spec.guard && Object.keys(spec.guard).length ? clone(spec.guard) : null}]);
+    guard: spec.guard && Object.keys(spec.guard).length ? clone(spec.guard) : null, buy: spec.buy ? clone(spec.buy) : null}]);
   const r = await run(ops, (late, res) => {
     applied.add(op);
     ((res && res.adjusted) || []).forEach(x => { if (x.doc) L[coll][x.id] = strip(x.doc); mirror(coll, x.id); });
@@ -300,6 +300,8 @@ async function commitRun(items, files, label, ep, out, expect){
     });
     /* Beim Entfernen eines Motorrads: alles, was der Speicher tatsächlich mit entfernt hat */
     ((res && res.removed) || []).forEach(x => { if (x.doc && L[x.store]) { delete L[x.store][x.doc.id]; mirror(x.store, x.doc.id); } });
+    ((res && res.updated) || []).forEach(x => { if (x.doc && L[x.store]) { L[x.store][x.doc.id] = strip(x.doc); mirror(x.store, x.doc.id); } });
+    if (out) out.updated = (res && res.updated) || [];
     if (out) out.removed = (res && res.removed) || [];
     if (late) touched.forEach(c => emit(c));
   }, {epoch: ep, expect: expect || null});

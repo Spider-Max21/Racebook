@@ -4,14 +4,15 @@
    Bildregeln: Das aufgenommene oder gewählte Bild bleibt bis zum Bestätigen nur im Arbeitsspeicher des Browsers
    (Objekt-URL). Gespeichert wird es erst zusammen mit dem Artikel, verkleinert, in derselben Transaktion. Abbrechen,
    Verwerfen oder ein anderes Bild geben es frei; es bleibt nichts in der App gespeichert. */
-import {S} from '../state.js';
+import {S, bikeList, bikeName} from '../state.js';
 import {$, $$, imgTag, hydrate, VErr} from '../ui.js';
-import {esc, str, fmt} from '../util.js';
+import {esc, str, fmt, fmtDate} from '../util.js';
+import {parsePrice, fmtPrice, partBikes, partNeedsCheck, buySum, unitName} from '../domain.js';
 import {PART_CATS, catName, catLabel, matchParts} from '../label.js';
 import * as ocr from '../ocr.js';
 
 /* Formularfelder je Vorschlagsfeld */
-export const FIELDS = [['name', 'pName'], ['cat', 'pCat'], ['sub', 'pSub'], ['maker', 'pMaker'], ['artNo', 'pArt'], ['spec', 'pSpec'], ['pack', 'pPack'], ['ean', 'pEan']];
+export const FIELDS = [['name', 'pName'], ['cat', 'pCat'], ['sub', 'pSub'], ['maker', 'pMaker'], ['artNo', 'pArt'], ['spec', 'pSpec'], ['pack', 'pPack'], ['ean', 'pEan'], ['price', 'pPrice']];
 export const EXTRA = ['cat', 'sub', 'maker', 'artNo', 'spec', 'pack', 'ean'];
 export const EXTRA_LABEL = {cat: 'Kategorie', sub: 'Unterkategorie', maker: 'Hersteller', artNo: 'Artikelnummer', spec: 'Spezifikation', pack: 'Gebindegröße', ean: 'Strichcode', photo: 'Bild'};
 const MARK = {ok: 'erkannt', check: 'bitte prüfen', none: 'nicht erkannt'};
@@ -77,6 +78,8 @@ function mark(k, st){
   if (box) box.classList.toggle('is-check', st === 'check');
 }
 export function clearMarks(){ setMarks(null); }
+/* Ab 1.5.0: Preis aus dem Bild beim Auffüllen eines vorhandenen Artikels – nur als Vorschlag „bitte prüfen“ */
+export function proposePrice(v){ if (!v) return; $('#pPrice').value = v; mark('price', 'check'); }
 /* Eingabe in einem vorgeschlagenen Feld: ab jetzt deine Angabe (keine Kennzeichnung, wird nicht mehr überschrieben) */
 export function onInput(t){
   if (!S.cap || !t || !t.id) return;
@@ -148,3 +151,79 @@ export function renderMatch(parts){
 export function status(cap, text, p){ if (S.cap !== cap) return; cap.status = text + (p > 0 && p < 1 ? ' ' + Math.round(p * 100) + ' %' : ''); const s = $('#pPhotoBox .thinking'); if (s) s.textContent = 'Erkennung läuft auf diesem Gerät: ' + cap.status + ' …'; }
 export const label = (p) => [catLabel(p.cat, p.sub), p.maker, p.artNo ? 'Art.-Nr. ' + p.artNo : '', p.pack].filter(Boolean).join(' · ');
 export {catName};
+
+/* ---------- Ab 1.5.0: Zuordnung zu mehreren Motorrädern ---------- */
+/* Auswahlliste der Motorräder; ohne Vorgabe bleibt die aktuelle Auswahl erhalten */
+export function renderBikePick(checked){
+  const list = $('#pBikesList'); if (!list) return;
+  const cur = new Set(checked != null ? checked : $$('input[name=pBikes]:checked', list).map(i => i.value));
+  const html = bikeList().map(b => '<label><input type="checkbox" name="pBikes" value="' + esc(b.id) + '"' + (cur.has(b.id) ? ' checked' : '') + '>' + esc(bikeName(b)) + '</label>').join('')
+    || '<p class="hint">Noch keine Motorräder angelegt.</p>';
+  if (checked != null || list.dataset.sig !== html) { list.innerHTML = html; list.dataset.sig = html; }
+  showBikePick();
+}
+export function showBikePick(){ const box = $('#pBikesBox'), sel = $('#pBike'); if (box && sel) box.hidden = sel.value !== 'some'; }
+/* Formular → Zuordnung: genau ein Motorrad wird wie bisher als Kennung gespeichert, mehrere als 'some' mit Liste */
+export function readAssignment(){
+  const v = $('#pBike').value;
+  if (v !== 'some') return {bike: v, bikes: []};
+  const ids = $$('#pBikesList input[name=pBikes]:checked').map(i => i.value).filter(id => S.bikes[id]).sort();
+  if (!ids.length) throw new VErr($('#pBike'), 'Wähle mindestens ein Motorrad aus oder „alle Motorräder“.');
+  return ids.length === 1 ? {bike: ids[0], bikes: []} : {bike: 'some', bikes: ids};
+}
+/* Zuordnung eines gespeicherten Artikels ins Formular (auch „Zuordnung prüfen“: Auswahl ohne Haken) */
+export function fillAssignment(p){
+  const sel = $('#pBike'); if (!sel || !p) return;
+  if (p.bike === 'some') { sel.value = 'some'; renderBikePick(p.bikes || []); }
+  else { if (Array.from(sel.options).some(o => o.value === p.bike)) sel.value = p.bike; renderBikePick(p.bike === 'both' ? [] : [p.bike]); }
+  showBikePick();
+}
+export function assignmentText(p){
+  if (!p) return '';
+  if (p.bike === 'both') return 'alle Motorräder';
+  if (partNeedsCheck(p)) return 'Zuordnung prüfen';
+  return partBikes(p).map(id => S.bikes[id] ? bikeName(S.bikes[id]) : 'entferntes Motorrad').join(', ') || 'nicht zugeordnet';
+}
+
+/* ---------- Ab 1.5.0: Einkaufspreis, Einheit, Einkäufe ---------- */
+const centsText = c => c == null ? '' : (c / 100).toFixed(2).replace('.', ',');
+export function readPrice(){
+  const r = parsePrice($('#pPrice').value);
+  if (r.err) throw new VErr($('#pPrice'), 'Einkaufspreis: ' + r.err + ' Leer lassen, wenn er nicht bekannt ist.');
+  const unit = $('#pUnit').value === 'piece' || $('#pUnit').value === 'pack' ? $('#pUnit').value : '';
+  if (r.cents != null && !unit) throw new VErr($('#pUnit'), 'Wähle, ob Anzahl und Preis pro Stück oder pro Gebinde gelten.');
+  return {price: r.empty ? null : r.cents, unit};
+}
+export function fillPrice(p, forFill){
+  const pr = $('#pPrice'); if (!pr) return;
+  pr.value = forFill || !p || p.price == null ? '' : centsText(p.price);
+  pr.placeholder = forFill && p && p.price != null ? 'zuletzt ' + fmtPrice(p.price) : 'leer = nicht erfasst';
+  $('#pPriceLabel').firstChild.textContent = forFill ? 'Bezahlt je Einheit (€) ' : 'Einkaufspreis (€) ';
+  $('#pUnit').value = p && (p.unit === 'piece' || p.unit === 'pack') ? p.unit : '';
+}
+/* Einkäufe eines vorhandenen Artikels (nur Anzeige); „Einkauf erfassen“ öffnet den Zugang */
+export function renderBuys(p, fill){
+  const box = $('#pBuys'); if (!box) return;
+  if (!p) { box.hidden = true; box.innerHTML = ''; return; }
+  /* Ab 1.5.0 (Prüfung PR 6): jeder Einkauf mit seinem eigenen, damals bestätigten Bezug – nicht mit der heutigen Einheit */
+  const sum = buySum(p), buys = (p.buys || []).slice().reverse();
+  const rows = buys.slice(0, 20).map(b => '<div class="buy"><span>' + esc(fmtDate(b.date)) + ' · ' + fmt(b.qty, 0) + ' ' + esc(buyUnit(b)) + (b.price == null ? ' · Preis nicht erfasst' : ' à ' + esc(fmtPrice(b.price))) + '</span>'
+    + (b.price == null ? '' : '<b>' + esc(fmtPrice(b.price * b.qty)) + '</b>') + '</div>').join('');
+  const per = sum.groups.map(g => fmt(g.qty, 0) + ' ' + buyUnit(g)).join(' und ');
+  box.hidden = false;
+  box.innerHTML = '<span class="lbl">Einkäufe</span>'
+    + (buys.length ? '<div class="buy-list">' + rows + '</div>' + (buys.length > 20 ? '<p class="hint">Die letzten 20 von ' + fmt(buys.length, 0) + ' Einkäufen; die Summe enthält alle.</p>' : '')
+      + '<p class="hint" id="pBuySum">Dokumentiert: ' + esc(fmtPrice(sum.cents)) + (per ? ' für ' + esc(per) : '')
+      + (sum.unknown ? '; ' + fmt(sum.unknown, 0) + ' ohne Preis' : '') + '. Bestand ohne erfassten Einkauf gilt als „Preis unbekannt“.</p>'
+      : '<p class="hint" id="pBuySum">Noch kein Einkauf mit Preis erfasst. Der vorhandene Bestand gilt als „Preis unbekannt“.</p>')
+    + (fill ? '' : '<div class="row"><button class="btn ghost" type="button" data-partfill="' + esc(p.id) + '">Einkauf erfassen</button></div>');
+}
+/* Preisbezug ausdrücklich: je Stück oder je Gebinde mit der erfassten Gebindegröße (z. B. „39,90 € je Gebinde (4 L)“) */
+export const unitText = p => { const u = unitName(p && p.unit); return u === 'Gebinde' && str(p.pack) ? u + ' (' + str(p.pack) + ')' : u; };
+/* Bezug eines Einkaufs: „Stück“, „Gebinde (je 4 L)“; ohne erfasste Einheit „Einheit (nicht angegeben)“ */
+const buyUnit = b => { const u = unitName(b && b.unit); return !u ? 'Einheit (nicht angegeben)' : u === 'Gebinde' && str(b.pack) ? u + ' (je ' + str(b.pack) + ')' : u; };
+export function priceLine(p){
+  if (!p || p.price == null) return '';
+  const u = unitText(p);
+  return fmtPrice(p.price) + (u ? ' je ' + u : '');
+}

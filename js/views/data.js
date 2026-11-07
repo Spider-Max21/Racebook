@@ -80,7 +80,7 @@ const OC_NAME = {log: 'Logbuch', rides: 'Fahrt', setups: 'Setup', defects: 'Mang
 export function orphanList(){
   const has = id => !!S.bikes[id];
   const out = [];
-  OC.forEach(c => S[c].forEach(x => { if (c === 'parts' ? (x.bike !== 'both' && !has(x.bike)) : !has(x.bike)) out.push({coll: c, doc: x}); }));
+  OC.forEach(c => S[c].forEach(x => { if (c === 'parts' ? (x.bike !== 'both' && x.bike !== 'some' && !has(x.bike)) : !has(x.bike)) out.push({coll: c, doc: x}); }));
   return out;
 }
 function orphanText(c, d){

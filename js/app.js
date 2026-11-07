@@ -125,7 +125,7 @@ function renderSys(){
 function orphanCount(){
   if (S.mode !== 'ready') return 0;
   const has = id => !!S.bikes[id];
-  return ['log', 'rides', 'setups', 'defects'].reduce((n, c) => n + S[c].filter(x => !has(x.bike)).length, 0) + S.parts.filter(p => p.bike !== 'both' && !has(p.bike)).length;
+  return ['log', 'rides', 'setups', 'defects'].reduce((n, c) => n + S[c].filter(x => !has(x.bike)).length, 0) + S.parts.filter(p => p.bike !== 'both' && p.bike !== 'some' && !has(p.bike)).length;
 }
 
 /* ---------- Bestand ersetzt (Sicherung eingespielt, Sicherheitskopie zurückgeholt, anderes Fenster) ----------

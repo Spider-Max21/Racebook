@@ -21,6 +21,7 @@ export function errText(e){
   if (c === 'aborted') return 'Der Speichervorgang wurde abgebrochen.';
   if (c === 'not_found') return 'Der Eintrag existiert nicht mehr.';
   if (c === 'stale') return 'Die Daten wurden inzwischen ersetzt (Sicherung eingespielt oder Sicherheitskopie zurückgeholt), auch in einem anderen Fenster. Dieser Vorgang gehörte zum vorherigen Stand.';
+  if (c === 'limit') return e.message || 'Die Höchstzahl an Einträgen ist erreicht.';
   if (c === 'orphan') return 'Das Motorrad gibt es nicht mehr, es wurde wohl in einem anderen Fenster entfernt.';
   if (c === 'timeout') return 'Der Speicher antwortet gerade nicht.';
   if (c === 'changed') return 'Die Daten des Motorrads haben sich inzwischen geändert, zum Beispiel in einem anderen Fenster.';

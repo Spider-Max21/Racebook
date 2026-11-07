@@ -111,7 +111,7 @@ function pick(field, value, conf, from){ value = value || ''; return {value, sta
 /* Hauptfunktion: lines = [{t, c, h}] in Lesereihenfolge, codes = [{format, value}] (Strichcodes, falls gelesen) */
 export function parseLabel(lines, codes){
   const L = usableLines(lines);
-  const out = {name: pick(), cat: pick(), sub: pick(), maker: pick(), artNo: pick(), spec: pick(), pack: pick(), ean: pick(), fit: '', empty: false, text: L.map(l => l.t)};
+  const out = {name: pick(), cat: pick(), sub: pick(), maker: pick(), artNo: pick(), spec: pick(), pack: pick(), ean: pick(), price: pick(), fit: '', empty: false, text: L.map(l => l.t)};
   const ean = (Array.isArray(codes) ? codes : []).map(c => String(c && c.value || '')).find(v => /^\d{8}$|^\d{12,14}$/.test(v));
   if (ean) out.ean = {value: ean, state: 'ok', from: 'Strichcode'};
   if (!L.length) { out.empty = !ean; return out; }
@@ -212,7 +212,16 @@ export function parseLabel(lines, codes){
     const t = [out.sub.value || (out.cat.value ? catName(out.cat.value) : ''), out.maker.value, out.artNo.value].filter(Boolean).join(' ');
     if (t) out.name = {value: t.slice(0, 120), state: 'check', from: ''};
   }
-  out.empty = !['name', 'cat', 'maker', 'artNo', 'spec', 'pack', 'ean'].some(k => out[k].value);
+  /* Ab 1.5.0: Preis auf einem Bildschirmfoto oder Preisschild – immer nur ein Vorschlag zum Prüfen (Bezug, Rabatt,
+     Versand sind auf einem Bild selten eindeutig). Versand-, Spar- und Statt-Preise zählen nicht. */
+  for (const l of L) {
+    if (/versand|liefer|ersparnis|sparen|statt|uvp|zzgl|rabatt|gutschein/i.test(l.t)) continue;
+    /* Betrag mit Cent: „9,90 €“, „€ 9,90“, „1.234,50 €“ (Tausenderpunkt), „9.90 EUR“; ohne Ziffer davor kein Treffer */
+    const AMT = '((?:\\d{1,3}(?:\\.\\d{3})+|\\d{1,5}),\\d{2}|\\d{1,5}\\.\\d{2})';
+    const m = l.t.match(new RegExp('(?:^|[^\\d.,])' + AMT + '\\s*(?:€|eur\\b)', 'i')) || l.t.match(new RegExp('€\\s*' + AMT + '(?![\\d.,])'));
+    if (m) { const v = m[1].includes(',') ? m[1] : m[1].replace('.', ','); out.price = {value: v, state: 'check', from: l.t}; break; }
+  }
+  out.empty = !['name', 'cat', 'maker', 'artNo', 'spec', 'pack', 'ean', 'price'].some(k => out[k].value);
   return out;
 }
 

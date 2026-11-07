@@ -547,3 +547,12 @@ body:not([data-page="error"]) .toast{bottom:calc(78px + env(safe-area-inset-bott
 .part-more>summary::-webkit-details-marker{display:none}
 .part-more>summary::after{content:"+";margin-left:auto;font:700 24px/1 var(--f-cond);color:var(--accent-text)}
 .part-more[open]>summary::after{content:"–"}
+
+/* Lager: Mehrfachzuordnung und Einkäufe (ab 1.5.0) */
+.bike-pick{border:1px solid var(--line);border-radius:var(--r-s);padding:8px 12px 10px;min-width:0}
+.bike-pick legend{font-size:13px;font-weight:600;color:var(--muted);padding:0 4px}
+.bike-pick-list{display:grid;gap:2px}
+.bike-pick-list label{display:flex;align-items:center;gap:10px;min-height:44px;margin:0;font-size:15px;font-weight:500;color:var(--ink);cursor:pointer}
+.bike-pick-list input{width:22px;height:22px;accent-color:var(--accent);flex:none}
+.buy-list{display:grid;gap:4px;font-size:14px}
+.buy-list .buy{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 10px;border-top:1px solid var(--line);padding-top:4px}

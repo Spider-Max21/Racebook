@@ -316,9 +316,14 @@
             <div class="f full" id="pMatch" hidden></div>
             <div class="f full"><label for="pName">Teil <span class="mark" data-mark="name"></span></label><input id="pName" autocomplete="off" placeholder="z. B. Ölfilter, Zündkerze, Bremsbeläge vorn"></div>
             <div class="f full"><label for="pBike">Für</label><select id="pBike"></select></div>
+            <fieldset class="f full bike-pick" id="pBikesBox" hidden><legend>Ausgewählte Motorräder</legend><div id="pBikesList" class="bike-pick-list"></div>
+              <p class="hint">Ein gemeinsamer Bestand für alle angehakten Motorräder. Ein später hinzugefügtes Motorrad kommt nicht automatisch dazu. Die Zuordnung sagt nichts über die technische Passung.</p></fieldset>
             <div class="f"><label for="pQty" id="pQtyLabel">Anzahl</label><input id="pQty" inputmode="numeric" value="1"></div>
             <div class="f"><label for="pMin">Nachkaufen ab</label><input id="pMin" inputmode="numeric" value="1"></div>
+            <div class="f"><label for="pPrice" id="pPriceLabel">Einkaufspreis (€) <span class="mark" data-mark="price"></span></label><input id="pPrice" inputmode="decimal" autocomplete="off" placeholder="leer = nicht erfasst"></div>
+            <div class="f"><label for="pUnit">Anzahl und Preis gelten pro</label><select id="pUnit"><option value="">– nicht angegeben –</option><option value="piece">Stück</option><option value="pack">Gebinde</option></select></div>
             <p class="hint f full" id="pQtyHint" hidden></p>
+            <div class="f full" id="pBuys" hidden></div>
             <details class="f full part-more" id="pMore">
               <summary>Weitere Angaben <span class="hint">Kategorie, Hersteller, Artikelnummer, Spezifikation, Gebinde, Bild</span></summary>
               <div class="grid">

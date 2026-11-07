@@ -2,7 +2,7 @@
    Übernommen aus Version 8 (geprüft mit 70 Regressionen) und erweitert um Mängel, Motorradfotos und lokale Dateien.
    Keine Oberfläche und kein Speicherzugriff: liest nur den geladenen Zustand S. */
 import {esc, pad, str, fmt, eur, uid, clone, reEsc, validId, safeUrl, parseNum, num, turns, isISO, todayISO, dayNum,
-  fromDayNum, shiftDate, addMonths, fmtDate, hexRgb, rgbHex, mixHex, lum, contrast, towards, onColor, canon, same, subOf} from './util.js';
+  fromDayNum, shiftDate, addMonths, fmtDate, hexRgb, rgbHex, mixHex, lum, contrast, towards, onColor, canon, same, subOf, MAX_BUYS} from './util.js';
 import {navigationOf} from './preferences.js';
 import {S, COLLS, bikeList, curBike, U, bikeName} from './state.js';
 import {parseWork, ivProposal, workPos, workEntry} from './work.js';
@@ -51,8 +51,11 @@ export const ZIP_FORMAT = 'racebook-backup';
    Ab 1.3.0 Version 9, wenn eine eigene Menübelegung (navigation) gespeichert ist; 1.2.x lehnt Version 9 ab.
    Ab 1.4.0 Version 10, wenn ein Lagerartikel Artikelangaben oder ein Artikelbild hat (Felder cat, sub, maker, artNo,
    spec, pack, ean, photo). 1.3.x kennt sie nicht und würde sie beim Einlesen still verwerfen; deshalb lehnt es Version 10 ab.
-   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8 bzw. 9. */
-export const ZIP_VERSION = 10;
+   Ab 1.5.0 Version 11, wenn ein Lagerartikel mehreren ausgewählten Motorrädern zugeordnet ist (bike 'some', bikes),
+   eine Bestandseinheit, einen Einkaufspreis oder Einkäufe hat (unit, price, buys). 1.4.x lehnt Version 11 ab.
+   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9 bzw. 10. */
+export const ZIP_VERSION = 11;
+export const ZIP_VERSION_V10 = 10;
 export const ZIP_VERSION_NAV = 9;
 export const ZIP_VERSION_V8 = 8;
 export const ZIP_VERSION_POS = 7;
@@ -75,9 +78,12 @@ export const needsV8 = next => Object.values((next && next.log) || {}).some(hasV
 export const PART_V10 = ['cat', 'sub', 'maker', 'artNo', 'spec', 'pack', 'ean', 'photo'];
 export const hasV10Part = p => !!p && typeof p === 'object' && PART_V10.some(k => p[k] != null && p[k] !== '');
 export const needsV10 = next => Object.values((next && next.parts) || {}).some(hasV10Part);
+/* Version 11: Mehrfachzuordnung, Einheit, Einkaufspreis, Einkäufe (ab 1.5.0) */
+export const hasV11Part = p => !!p && typeof p === 'object' && (p.bike === 'some' || (Array.isArray(p.bikes) && p.bikes.length > 0) || (p.unit != null && p.unit !== '') || p.price != null || (Array.isArray(p.buys) && p.buys.length > 0));
+export const needsV11 = next => Object.values((next && next.parts) || {}).some(hasV11Part);
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
-const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
+const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && d.bike !== 'some' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
 /* Verwaiste Einträge abtrennen: {clean: {coll: {id: doc}}, orphans: {coll: {id: doc}}, count} */
 export function splitOrphans(next){
   const bikeIds = new Set(Object.keys(next.bikes || {}));
@@ -313,13 +319,65 @@ export function cleanDoc(coll, x, strict, where){
   if (coll === 'parts') {
     /* Ab 1.4.0: Artikelangaben (Kategorie, Hersteller, Artikelnummer, Spezifikation, Gebinde, Strichcode) und Artikelbild */
     const ph = x.photo && typeof x.photo === 'object' && validId(x.photo.id) ? {id: x.photo.id, thumbId: validId(x.photo.thumbId) ? x.photo.thumbId : ''} : null;
-    return {name: h.s(x.name, 'Teil', {req:true, max:120}), bike: x.bike === 'both' ? 'both' : bike,
+    /* Ab 1.5.0: Zuordnung 'both' (alle Motorräder), eine Kennung (genau ein Motorrad) oder 'some' mit der Liste bikes
+       (ausgewählte Motorräder; leer = „Zuordnung prüfen“). Einheit, Einkaufspreis (Cent) und Einkäufe (Zugänge). */
+    const multi = x.bike === 'some';
+    const bikes = multi ? Array.from(new Set(h.a(x.bikes, 'Motorräder').filter(v => { if (validId(v)) return true; h.fail('Motorräder', 'enthält eine ungültige Kennung.'); return false; }))).sort() : [];
+    /* Einkäufe werden nie still gekürzt: mehr als MAX_BUYS gelten bei der strengen Prüfung (Sicherung) als Fehler */
+    const buysIn = h.a(x.buys, 'Einkäufe'); if (buysIn.length > MAX_BUYS) h.fail('Einkäufe', 'sind mehr als ' + MAX_BUYS + ' Einträge.');
+    return {name: h.s(x.name, 'Teil', {req:true, max:120}), bike: x.bike === 'both' ? 'both' : multi ? 'some' : bike, bikes,
+      unit: h.one(x.unit, 'Einheit', PART_UNITS, ''), price: h.n(x.price, 'Einkaufspreis', {int:true, min:0, max:MAX_PRICE}),
+      buys: buysIn.map((b, i) => cleanBuy(b, h, i)).filter(Boolean),
       qty: h.n(x.qty, 'Anzahl', {int:true, min:0, max:99999}) || 0, min: h.n(x.min, 'Nachkaufen ab', {int:true, min:0, max:99999}) || 0, created: h.n(x.created, 'Zeitstempel', {int:true, min:0}) || 0,
       cat: h.one(x.cat, 'Kategorie', CAT_KEYS, ''), sub: h.s(x.sub, 'Unterkategorie', {max:60}), maker: h.s(x.maker, 'Hersteller', {max:60}), artNo: h.s(x.artNo, 'Artikelnummer', {max:60}),
       spec: h.s(x.spec, 'Spezifikation', {max:200}), pack: h.s(x.pack, 'Gebindegröße', {max:40}), ean: /^\d{8}$|^\d{12,14}$/.test(str(x.ean)) ? str(x.ean) : '', photo: ph};
   }
   return null;
 }
+/* Einkauf (Zugang) eines Lagerartikels: Datum, Menge, bezahlter Preis je Einheit in Cent (null = nicht erfasst,
+   0 = ausdrücklich kostenlos), Vorgangskennung und – unveränderlich mit dem Einkauf – der damals bestätigte Bezug:
+   Einheit (Stück/Gebinde) und Gebindegröße. Spätere Änderungen am Artikel deuten alte Einkäufe nicht um. */
+export const PART_UNITS = ['piece', 'pack'];
+export const MAX_PRICE = 9999999;
+function cleanBuy(b, h, i){
+  b = h.o(b, 'Einkauf ' + (i + 1)); if (!b || typeof b !== 'object') return null;
+  const date = h.d(b.date, 'Einkauf ' + (i + 1) + ' (Datum)', {req:true}), qty = h.n(b.qty, 'Einkauf ' + (i + 1) + ' (Menge)', {int:true, min:1, max:99999});
+  if (!date || qty == null) return null;
+  return {date, qty, price: h.n(b.price, 'Einkauf ' + (i + 1) + ' (Preis)', {int:true, min:0, max:MAX_PRICE}), op: validId(b.op) ? b.op : '',
+    unit: h.one(b.unit, 'Einkauf ' + (i + 1) + ' (Einheit)', PART_UNITS, ''), pack: h.s(b.pack, 'Einkauf ' + (i + 1) + ' (Gebindegröße)', {max:40})};
+}
+/* Gehört ein Lagerartikel (auch) zu diesem Motorrad? 'both' gilt für alle */
+export const partFor = (p, bid) => !!p && (p.bike === 'both' || p.bike === bid || (p.bike === 'some' && Array.isArray(p.bikes) && p.bikes.includes(bid)));
+/* Konkrete Motorräder eines Artikels ([] bei 'both') */
+export const partBikes = p => !p ? [] : p.bike === 'some' ? (Array.isArray(p.bikes) ? p.bikes : []) : p.bike === 'both' ? [] : [p.bike];
+/* „Zuordnung prüfen“: ausgewählte Motorräder, aber keines mehr vorhanden */
+export const partNeedsCheck = p => !!p && p.bike === 'some' && !(Array.isArray(p.bikes) && p.bikes.length);
+/* Dokumentierte Einkaufskosten (Cent), Menge mit und ohne bekannten Preis, Mengen je Bezug (Einheit und Gebindegröße
+   des jeweiligen Einkaufs; verschiedene Bezüge werden nicht zusammengezählt) */
+export function buySum(p){
+  let cents = 0, known = 0, unknown = 0; const by = new Map();
+  ((p && p.buys) || []).forEach(b => {
+    if (b.price == null) { unknown += b.qty; return; }
+    cents += b.price * b.qty; known += b.qty;
+    const k = (b.unit || '') + '|' + (b.unit === 'pack' ? str(b.pack) : '');
+    const g = by.get(k) || {unit: b.unit || '', pack: b.unit === 'pack' ? str(b.pack) : '', qty: 0}; g.qty += b.qty; by.set(k, g);
+  });
+  return {cents, known, unknown, groups: Array.from(by.values())};
+}
+/* Geldbetrag in Euro (deutsche Eingabe „9,90“, auch „9.90“, „1.234,50“, „0“) → Cent; leer = null */
+export function parsePrice(t){
+  const raw = String(t == null ? '' : t).trim(), s = raw.replace(/\s|€|eur/gi, '');
+  if (!raw) return {empty: true, cents: null};
+  if (!s) return {err: 'Bitte einen Betrag wie 9,90 eingeben.'};
+  let m = s.match(/^(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?$/) || s.match(/^(\d+)(?:\.(\d{1,2}))?$/);
+  if (!m) return {err: 'Bitte einen Betrag wie 9,90 eingeben.'};
+  const euros = Number(m[1].replace(/\./g, '')), cents = euros * 100 + Number((m[2] || '').padEnd(2, '0') || 0);
+  if (!Number.isSafeInteger(cents) || cents > MAX_PRICE) return {err: 'Der Betrag ist zu groß.'};
+  return {cents};
+}
+export const fmtPrice = c => c == null ? '' : (c / 100).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €';
+export const unitName = (u, n) => u === 'pack' ? (n === 1 ? 'Gebinde' : 'Gebinde') : u === 'piece' ? 'Stück' : '';
+
 /* Einheitliche Form jedes gespeicherten Eintrags (alle Felder, Standardwerte). Damit ist ein
    Eintrag nach Sicherung und Wiederherstellung exakt gleich, egal auf welchem Weg er entstand. */
 export const canonDoc = (coll, d) => cleanDoc(coll, d, false, '');
@@ -734,7 +792,7 @@ function partEntries(kind, rest, ctx){
   partItems(rest).forEach(it => {
     const n = it.qty;
     if (n != null && (!Number.isInteger(n) || n < 0 || n > 99999)) { notes.push('Die Anzahl bei „' + it.name + '“ ist unklar'); return; }
-    const ex = S.parts.find(p => normName(p.name) === normName(it.name) && (p.bike === 'both' || p.bike === ctx.b.id));
+    const ex = S.parts.find(p => normName(p.name) === normName(it.name) && partFor(p, ctx.b.id));
     const base = {kind: 'part', mode: kind, bike: ctx.b.id, date: ctx.date, name: ex ? ex.name : it.name, partId: ex ? ex.id : '', count: n == null ? (kind === 'bought' ? 1 : 0) : n};
     if (kind === 'bought') out.push(Object.assign(base, ex ? {before: ex.qty, after: Math.min(99999, ex.qty + base.count), min: ex.min} : {before: null, after: base.count, min: 1}));
     else if (ex) {
@@ -870,7 +928,8 @@ function strictCollections(map){
   });
   const bikeIds = new Set(Object.keys(next.bikes));
   ['log', 'rides', 'setups', 'defects'].forEach(k => Object.keys(next[k]).forEach(id => { if (!bikeIds.has(next[k][id].bike)) throw new Error(NAMES[k] + ' „' + id + '“ gehört zu keinem Motorrad in der Sicherung.'); }));
-  Object.keys(next.parts).forEach(id => { const p = next.parts[id]; if (p.bike !== 'both' && !bikeIds.has(p.bike)) throw new Error('Teil „' + p.name + '“ gehört zu keinem Motorrad in der Sicherung.'); });
+  Object.keys(next.parts).forEach(id => { const p = next.parts[id]; if (p.bike !== 'both' && p.bike !== 'some' && !bikeIds.has(p.bike)) throw new Error('Teil „' + p.name + '“ gehört zu keinem Motorrad in der Sicherung.');
+    if (p.bike === 'some') p.bikes.forEach(b => { if (!bikeIds.has(b)) throw new Error('Teil „' + p.name + '“ ist einem Motorrad zugeordnet, das nicht in der Sicherung steht.'); }); });
   /* Gleiche Grenzen wie im Formular, abhängig von der Einheit des Motorrads */
   Object.keys(next.bikes).forEach(id => {
     const b = next.bikes[id], lim = LIM[b.unit === 'km' ? 'km' : 'h'], n = 'Motorrad ' + bikeLabel(b);
@@ -984,6 +1043,7 @@ export function validateZipJson(d){
   if (d.version < 9 && d.navigation != null) throw new Error('Menübelegung in einer Sicherung vor Version 9.');
   const teile = [].concat(Array.isArray(d.teile) ? d.teile : [], d.verwaist && Array.isArray(d.verwaist.teile) ? d.verwaist.teile : []);
   if (d.version < 10 && teile.some(hasV10Part)) throw new Error('Die Sicherung ist beschädigt (Artikelangaben oder Artikelbilder in einer Sicherung vor Version 10).');
+  if (d.version < 11 && teile.some(hasV11Part)) throw new Error('Die Sicherung ist beschädigt (Mehrfachzuordnung oder Einkaufspreise in einer Sicherung vor Version 11).');
   const navigation = navigationOf(d.navigation);
   const map = {}; COLLS.forEach(k => { map[k] = d[KEYS[k]]; });
   const next = strictCollections(map);

@@ -17,7 +17,7 @@
      nicht Teil der Sicherung.
    - Keine Oberfläche, keine Fachlogik. */
 
-import {bikeFp, canon} from './util.js';
+import {bikeFp, canon, MAX_BUYS} from './util.js';
 
 export const DB_NAME = 'racebook';
 export const DB_VERSION = 4;
@@ -77,7 +77,7 @@ export function mapErr(e){
   return {code, message: (e && e.message) || ''};
 }
 /* Diese Fehler bedeuten sicher: nichts gespeichert */
-export const FINAL_CODES = ['quota_exceeded', 'aborted', 'closed', 'version', 'not_found', 'clone', 'constraint', 'blocked', 'unknown', 'invalid', 'stale', 'orphan', 'changed'];
+export const FINAL_CODES = ['quota_exceeded', 'aborted', 'closed', 'version', 'not_found', 'clone', 'constraint', 'blocked', 'unknown', 'invalid', 'stale', 'orphan', 'changed', 'limit'];
 
 let db = null, name = DB_NAME, chan = null;
 const changeCbs = [];
@@ -176,7 +176,12 @@ const needsBike = o => {
   if (o.type === 'adjust') return !!o.set && Object.prototype.hasOwnProperty.call(o.set, 'bike') && o.set.bike !== 'both';
   return false;
 };
-const bikeOfOp = o => o.type === 'put' ? o.value.bike : o.type === 'adjust' ? o.set.bike : o.patch.bike;
+/* Motorräder, die es für den Vorgang geben muss. Ab 1.5.0 bei Lagerartikeln mit Auswahl ('some') jedes ausgewählte. */
+const bikesOfOp = o => {
+  const v = o.type === 'put' ? o.value : o.type === 'adjust' ? o.set : o.patch;
+  if (o.store === 'parts' && v.bike === 'some') return Array.isArray(v.bikes) ? v.bikes : [];
+  return [v.bike];
+};
 const clampQty = n => Math.max(0, Math.min(99999, Math.round(Number(n) || 0)));
 /* Älteste Kennungen entfernen, damit der Eintrag klein bleibt */
 function pruneLedger(led){
@@ -199,7 +204,7 @@ export function commit(ops, opts){
     if (ops.some(o => o.type === 'delBike')) REC.forEach(s => stores.add(s));
     let tx;
     try { tx = txOf(Array.from(stores), 'readwrite'); } catch (e) { reject(mapErr(e)); return; }
-    const t = T(), result = {removed: [], adjusted: []};
+    const t = T(), result = {removed: [], adjusted: [], updated: []};
     let injected = null, done = false;
     const fail = e => { if (!injected) injected = e; try { tx.abort(); } catch (_) {} };
     tx.oncomplete = () => {
@@ -234,11 +239,11 @@ export function commit(ops, opts){
           const st = tx.objectStore(o.store);
           if (needsBike(o)) {
             /* Beziehung in derselben Transaktion prüfen: gibt es das Motorrad (noch)? */
-            const bid = bikeOfOp(o);
-            if (!putBikes.has(bid)) {
+            bikesOfOp(o).forEach(bid => {
+              if (putBikes.has(bid)) return;
               const c = tx.objectStore('bikes').count(bid);
               c.onsuccess = () => { if (!c.result) fail({code: 'orphan', message: o.store + ' → Motorrad ' + bid}); };
-            }
+            });
           }
           if (o.type === 'put') st.put(o.value);
           else if (o.type === 'del') st.delete(o.id);
@@ -262,8 +267,12 @@ export function commit(ops, opts){
                    anderer Wert (und nicht schon derselbe neue), wird nichts geändert, auch nicht die Anzahl. */
                 const cv = v => canon(v === undefined ? null : v);
                 if (o.guard && Object.keys(o.guard).some(f => cv(d[f]) !== cv(o.guard[f]) && !(o.set && cv(d[f]) === cv(o.set[f])))) { fail({code: 'changed', message: 'Dieser Artikel wurde inzwischen geändert.'}); return; }
+                /* Ab 1.5.0: Einkaufsverlauf nie kürzen; ist die Grenze erreicht, wird nichts gespeichert */
+                if (o.buy && Array.isArray(d.buys) && d.buys.length >= MAX_BUYS) { fail({code: 'limit', message: 'Für diesen Artikel sind schon ' + MAX_BUYS + ' Einkäufe mit Preis gespeichert. Weitere lassen sich nicht erfassen; einen Zugang ohne Preis kannst du weiter eintragen.'}); return; }
                 d.qty = clampQty(clampQty(d.qty) + o.add);
                 if (o.set) Object.assign(d, o.set);
+                /* Ab 1.5.0: Einkauf (Zugang) mit Preis genau einmal je Vorgang festhalten */
+                if (o.buy) d.buys = (Array.isArray(d.buys) ? d.buys : []).concat([Object.assign({}, o.buy, {op: o.op})]);
                 if (o.low) d.min = Math.max(clampQty(d.min), d.qty);
                 st.put(d); led.ids[o.op] = Date.now();
                 result.adjusted.push({id: o.id, doc: d, dup: false});
@@ -275,10 +284,23 @@ export function commit(ops, opts){
             g.onsuccess = () => { if (g.result) result.removed.push({store: 'bikes', doc: g.result}); };
             st.delete(o.id);
             /* Abhängige Einträge aus dem tatsächlich gespeicherten Bestand, nicht aus der Anzeige */
-            DEP.concat(['parts']).forEach(s => {
+            DEP.forEach(s => {
               const ds = tx.objectStore(s), r = ds.getAll();
               r.onsuccess = () => { for (const d of r.result) { if (d && d.bike === o.id) { if (!step()) return; ds.delete(d.id); result.removed.push({store: s, doc: d}); } } };
             });
+            /* Ab 1.5.0: Lagerartikel bleiben mit ihrem Bestand erhalten. Das Motorrad fällt nur aus ihrer Zuordnung;
+               war es die letzte, steht der Artikel auf „Zuordnung prüfen“ (bike 'some' ohne Motorräder), nie still auf 'both'. */
+            const ps = tx.objectStore('parts'), pr = ps.getAll();
+            pr.onsuccess = () => {
+              for (const d of pr.result) {
+                if (!d) continue;
+                const inSome = d.bike === 'some' && Array.isArray(d.bikes) && d.bikes.includes(o.id);
+                if (d.bike !== o.id && !inSome) continue;
+                if (!step()) return;
+                const n = Object.assign({}, d, {bike: 'some', bikes: inSome ? d.bikes.filter(b => b !== o.id) : []});
+                ps.put(n); result.updated.push({store: 'parts', doc: n, before: d});
+              }
+            };
           } else throw {code: 'invalid', message: 'Unbekannte Operation'};
         }
         if (t && t.quota) {
