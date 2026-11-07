@@ -16,7 +16,8 @@ export const S = {
   bike: lsGet('bike') || '', view: 'home', section: lsGet('section') || 'status',
   bikes: {}, log: [], rides: [], setups: [], parts: [], defects: [], der: {},
   meta: {changeSeq: 0, lastBackupAt: null, lastBackupSeq: 0, lastBackupName: '', lastBackupSize: 0, lastBackupHow: ''},
-  editing: {}, logTasks: new Set(), editSetup: null, pending: null,
+  editing: {}, logTasks: new Set(), editSetup: null, setupBase: null, pending: null,
+  cap: null, partImg: null, fill: null,
   /* ab 1.2.0: Grundlage offener Bearbeiten-Formulare (Technik), Logbuch-Formular (Tätigkeiten, Bearbeiten), Checkliste, Reihenfolge */
   editBase: {}, logWork: [], logIvMan: {}, logIvAuto: new Set(), logOrig: '', logOpen: [], logEdit: null, logEditPrev: null, checkDraft: null, ordering: false,
   adding: false, doneOpen: null, doneDraft: null, oemDraft: null, importDraft: null,

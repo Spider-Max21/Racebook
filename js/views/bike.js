@@ -10,7 +10,10 @@ import {CHECK, GROUNDS, WEATHER, FLUIDS, MONTHS, LIM, MAX_COST, BRANDS, BRAND_LI
 import * as store from '../store.js';
 import {opFor, parkOp, execOp, bumpGen, lowCheck, addUnres, BIKE_FORMS, cleanupFiles, payloadFiles, flow, reconcile} from '../ops.js';
 import {$, $$, toast, errText, arm, VErr, fieldNum, fieldDate, imgTag, hydrate, fileUrl, icon, fmtSize} from '../ui.js';
-import {makePhoto, makeBikePhoto, makePdf} from '../images.js';
+import {makePhoto, makeBikePhoto, makePdf, makeArticlePhoto} from '../images.js';
+import * as stock from './stock.js';
+import * as ocr from '../ocr.js';
+import {parseLabel} from '../label.js';
 import {openCropper} from '../cropper.js';
 import {R} from '../registry.js';
 import {jumpOk, typoPlan, checkPlan, openFix, renderMeter, meterPlaceholder, saveMeter, meterName, askSegments, SEG_SAVE_CHANGED} from './counter.js';
@@ -221,6 +224,9 @@ function editPending(i){
       partEditMode(ex, q);
       $('#pName').value = ex.name; $('#pQty').value = String(x.mode === 'bought' ? l.after : q); $('#pMin').value = String(x.mode === 'bought' ? Math.round(ex.min || 0) : l.min);
       const pb = $('#pBike'); if (pb && Array.from(pb.options).some(o => o.value === ex.bike)) pb.value = ex.bike;
+      /* Ab 1.4.0: Artikelangaben aus demselben Datensatz wie die Grundlage (S.partBase.raw) eintragen; sonst würden die
+         leeren Felder beim Speichern als bewusste Löschung gelten (Prüfung PR 2, P1) */
+      stock.fillExtra(S.partBase && S.partBase.id === ex.id ? S.partBase.raw : ex, ex.id);
     } else {
       $('#pName').value = x.name || ''; $('#pQty').value = String(x.mode === 'bought' ? x.count : 0); $('#pMin').value = '1';
       const pb = $('#pBike'); if (pb && Array.from(pb.options).some(o => o.value === x.bike)) pb.value = x.bike;
@@ -272,7 +278,7 @@ export function closeDraft(k){
   else if (k === 'hoursForm') { const hf = $('#hoursForm'); hf.hidden = true; hoursReset(); }
   else if (k === 'meterForm') { const mf = $('#meterForm'); if (mf) { mf.reset(); $('#mDate').value = todayISO(); meterPlaceholder(curBike()); } }
   else if (k === 'setupForm') { resetSetupForm(); $('#setupDetails').open = false; }
-  else if (k === 'partForm') { $('#pName').value = ''; $('#pQty').value = '1'; $('#pMin').value = '1'; partEditMode(null); }
+  else if (k === 'partForm') { stock.dropCap(); stock.dropImg(); S.fill = null; $('#pName').value = ''; $('#pQty').value = '1'; $('#pMin').value = '1'; stock.fillExtra(null); stock.clearMarks(); partEditMode(null); renderPartBike(); }
   else if (k === 'addBikeForm') { S.adding = false; dropAddPhoto(); const el = $('#addBike'); if (el) el.innerHTML = ''; }
   else if (k === 'defectForm' || k === 'defDoneForm') { R.closeDefectDraft(k); }
   bumpGen(k);
@@ -293,13 +299,90 @@ function partEditMode(ex, base){
   if (ex) { f.dataset.part = ex.id; f.dataset.base = String(base); } else { delete f.dataset.part; delete f.dataset.base; }
   /* Grundlage des Entwurfs (ab 1.3.1): gespeicherte Angaben beim Öffnen; beim Speichern zählen nur Abweichungen davon.
      Ab 1.3.2 aus genau dem Datensatz, aus dem auch das Formular befüllt wird (ex), nie aus einem anderen Stand. */
-  S.partBase = ex ? {id: ex.id, name: ex.name, bike: ex.bike, min: ex.min} : null;
+  S.partBase = ex ? {id: ex.id, name: ex.name, bike: ex.bike, min: ex.min, raw: clone(store.peek('parts', ex.id) || ex)} : null;
   const pc = $('#partConflict'); if (pc) { pc.hidden = true; pc.textContent = ''; }
   $('#partFormTitle').textContent = ex ? 'Teil ändern' : 'Teil hinzufügen';
   $('#pSave').textContent = ex ? 'Speichern' : 'Hinzufügen';
   $('#pCancel').hidden = !ex;
   const h = $('#partEditHint'); h.hidden = !ex;
   h.textContent = ex ? 'Du änderst den vorhandenen Posten „' + ex.name + '“ (beim Öffnen ' + fmt(base, 0) + ' im Vorrat). Anzahl = Bestand nach dem Speichern. Kauft jemand in einem anderen Fenster gleichzeitig dazu, wird beides gezählt.' : '';
+  partModeUi();
+}
+/* Ab 1.4.0: Formular je nach Art (neuer Artikel, aus Foto, Bearbeiten, Auffüllen); Bild, Vorschlag, passende Artikel */
+function partModeUi(){
+  const f = $('#partForm'); if (!f) return;
+  const pid = f.dataset.part || '', cap = S.cap && !pid ? S.cap : null, fill = S.fill && S.fill.pid === pid ? S.fill : null;
+  const qh = $('#pQtyHint');
+  if (fill) {
+    const raw = store.peek('parts', pid) || {};
+    $('#partFormTitle').textContent = 'Artikel auffüllen'; $('#pSave').textContent = 'Auffüllen'; $('#pCancel').hidden = false;
+    $('#pQtyLabel').textContent = 'Zugang (kommt dazu)';
+    $('#partEditHint').hidden = false;
+    $('#partEditHint').textContent = 'Du füllst „' + (raw.name || '') + '“ auf (bisher ' + fmt(raw.qty || 0, 0) + ' im Vorrat). Trag ein, wie viele Packungen oder Stück dazukommen. Kauft jemand in einem anderen Fenster gleichzeitig dazu, wird beides gezählt.';
+    qh.hidden = false; qh.textContent = fill.adopt ? 'Das Bild wird für diesen Artikel übernommen, weil er noch keins hat.' : fill.hadCap ? 'Das Bild wird nicht gespeichert; der Artikel hat schon eins.' : '';
+    if (!qh.textContent) qh.hidden = true;
+  } else if (cap) {
+    $('#partFormTitle').textContent = 'Artikel aus Foto'; $('#pSave').textContent = 'Hinzufügen'; $('#pCancel').hidden = false;
+    $('#pQtyLabel').textContent = 'Anzahl (bitte selbst angeben)';
+    qh.hidden = false;
+    qh.textContent = 'Anzahl = wie viele Packungen oder Stück du einlagerst. Racebook zählt keine abgebildeten Teile, und eine Angabe wie „4 L“ ist die Gebindegröße, nicht der Restinhalt. Ein Lagerzugang ändert keine Wartungsintervalle.';
+  } else { $('#pQtyLabel').textContent = 'Anzahl'; qh.hidden = true; qh.textContent = ''; }
+  stock.renderPhotoBox(); stock.renderMatch(S.parts);
+  const cur = pid ? store.peek('parts', pid) : null;
+  stock.renderImgBox(cur ? Object.assign({id: pid}, cur) : null);
+}
+/* „Für“: beim Artikel aus einem Foto ohne Vorauswahl (die Zuordnung wählst du selbst) */
+function renderPartBike(){
+  const pb = $('#pBike'), pv = pb.value, f = $('#partForm');
+  const ask = !!S.cap && !f.dataset.part;
+  let po = (ask ? '<option value="">– bitte wählen –</option>' : '') + '<option value="both">alle Motorräder</option>' + bikeList().map(x => '<option value="' + esc(x.id) + '">' + esc(bikeName(x)) + '</option>').join('');
+  if (pv && pv !== 'both' && !S.bikes[pv]) po += '<option value="' + esc(pv) + '">Entferntes Motorrad – Zuordnung ändern</option>';
+  if (pb.innerHTML !== po) pb.innerHTML = po;
+  pb.value = Array.from(pb.options).some(o => o.value === pv) && (pv || ask) ? pv : ask ? '' : 'both';
+}
+/* ---------- Artikel aus einem Foto (ab 1.4.0) ---------- */
+function startCapture(file){
+  closeDraft('partForm');
+  const det = $('#partForm').closest('details'); if (det) det.open = true;
+  drafts.mark('part');
+  const cap = stock.capOpen(file);
+  $('#pQty').value = '';
+  renderPartBike(); $('#pBike').value = ''; partModeUi(); stock.fillCats();
+  drafts.touch('part');
+  $('#partForm').scrollIntoView({block: 'start'});
+  runRecognition(cap);
+}
+function runRecognition(cap){
+  const tok = cap.run = (cap.run || 0) + 1;
+  cap.state = 'reading'; cap.status = 'Bild wird vorbereitet'; cap.prop = null; stock.renderPhotoBox(); stock.renderMatch(S.parts);
+  const live = () => S.cap === cap && cap.run === tok && cap.state === 'reading';
+  ocr.recognize(cap.file, (st, p) => { if (live()) stock.status(cap, st, p); }).then(r => {
+    if (!live()) return;
+    cap.state = 'done'; cap.ms = r.ms; cap.prop = parseLabel(r.lines, r.codes); S.ocrReady = null;
+    stock.applyProposal(cap.prop); partModeUi();
+  }, e => {
+    if (!live()) return;
+    if (e && (e.code === 'decode' || e.code === 'too_big')) {
+      closeDraft('partForm');
+      toast(e.code === 'too_big' ? 'Das Bild ist zu groß (höchstens 30 MB). Es wurde nichts gespeichert.' : 'Das Bild konnte nicht gelesen werden. Wähle ein anderes Bild oder trag den Artikel ohne Bild ein.');
+      return;
+    }
+    cap.state = e && e.code === 'cancelled' ? 'cancelled' : 'unavailable'; partModeUi();
+  });
+}
+/* Passenden vorhandenen Artikel auffüllen: Formular ändert genau diesen Artikel, die Anzahl ist der Zugang */
+function openFill(pid){
+  const raw = store.peek('parts', pid);
+  if (!raw) { toast('Diesen Artikel gibt es inzwischen nicht mehr.'); return; }
+  const cap = S.cap, p = Object.assign(clone(raw), {id: pid});
+  const adopt = !!(cap && !cap.noImage && !p.photo), file = adopt ? cap.file : null;
+  stock.dropCap(); stock.dropImg(); S.fill = {pid, adopt, hadCap: !!cap};
+  partEditMode(p, p.qty);
+  $('#pName').value = p.name; $('#pMin').value = p.min; renderPartBike(); $('#pBike').value = p.bike; stock.fillExtra(p); stock.clearMarks();
+  if (file) stock.setImg(file);
+  $('#pQty').value = '';
+  partModeUi(); drafts.touch('part');
+  $('#pQty').focus();
 }
 
 /* Lagerartikel inzwischen in einem anderen Fenster geändert (ab 1.3.1): nichts gespeichert. Eigene Eingaben bleiben,
@@ -310,17 +393,25 @@ async function partConflict(pid, pay, base, qty, pb0){
   const f = $('#partForm'), now = store.peek('parts', pid);
   if (!now || f.dataset.part !== pid) { if (!now) { closeDraft('partForm'); toast('Dieses Teil gibt es inzwischen nicht mehr. Es wurde nichts gespeichert.'); } return; }
   const set = pay.set || {}, nm = id => id === 'both' ? 'alle Motorräder' : S.bikes[id] ? titleOf(S.bikes[id]) : 'nicht zugeordnet';
-  const show = {name: v => '„' + v + '“', bike: nm, min: v => fmt(v, 0)}, label = {name: 'Name', bike: 'Für', min: 'Nachkaufen ab'};
+  const txt = v => v == null || v === '' ? '(leer)' : '„' + v + '“';
+  const show = {name: v => '„' + v + '“', bike: nm, min: v => fmt(v, 0), cat: v => stock.catName(v) || '(leer)', photo: v => v ? 'ein Bild' : 'kein Bild'};
+  const label = Object.assign({name: 'Name', bike: 'Für', min: 'Nachkaufen ab'}, stock.EXTRA_LABEL);
+  const raw0 = (pb0 && pb0.raw) || pb0 || {}, cv = v => canon(v == null || v === '' ? null : v);
   const both = [];
-  ['name', 'bike', 'min'].forEach(k => {
-    if (k in set) { if (canon(now[k]) !== canon(pb0[k]) && canon(now[k]) !== canon(set[k])) both.push(label[k] + ': dort ' + show[k](now[k]) + ', bei dir ' + show[k](set[k])); }
+  ['name', 'bike', 'min'].concat(stock.EXTRA, ['photo']).forEach(k => {
+    const before = k === 'name' || k === 'bike' || k === 'min' ? pb0[k] : raw0[k];
+    if (k in set) { if (cv(now[k]) !== cv(before) && cv(now[k]) !== cv(set[k])) both.push(label[k] + ': dort ' + (show[k] || txt)(now[k]) + ', bei dir ' + (show[k] || txt)(set[k])); }
     else if (k === 'name') $('#pName').value = now.name;
     else if (k === 'bike') { const pb = $('#pBike'); if (Array.from(pb.options).some(x => x.value === now.bike)) pb.value = now.bike; }
-    else $('#pMin').value = String(now.min);
+    else if (k === 'min') $('#pMin').value = String(now.min);
+    else if (k === 'photo') { /* Bild unverändert gelassen: zeigt jetzt den aktuellen Stand */ }
+    else if (k === 'cat') { $('#pCat').value = now.cat || ''; stock.fillSubs(); }
+    else $('#' + {sub: 'pSub', maker: 'pMaker', artNo: 'pArt', spec: 'pSpec', pack: 'pPack', ean: 'pEan'}[k]).value = now[k] || '';
   });
-  const delta = qty - base;
-  S.partBase = {id: pid, name: now.name, bike: now.bike, min: now.min};
-  f.dataset.base = String(now.qty); $('#pQty').value = String(Math.max(0, Math.min(99999, now.qty + delta)));
+  const delta = S.fill && S.fill.pid === pid ? 0 : qty - base;
+  S.partBase = {id: pid, name: now.name, bike: now.bike, min: now.min, raw: Object.assign(clone(now), {id: pid})};
+  f.dataset.base = String(now.qty); if (!(S.fill && S.fill.pid === pid)) $('#pQty').value = String(Math.max(0, Math.min(99999, now.qty + delta)));
+  partModeUi();
   const pc = $('#partConflict');
   pc.textContent = 'Dieser Artikel wurde inzwischen in einem anderen Fenster geändert. Es wurde nichts gespeichert. ' + (both.length ? both.join('; ') + '. ' : '')
     + 'Dort sind jetzt ' + fmt(now.qty, 0) + ' im Vorrat' + (delta ? '; deine Änderung (' + (delta > 0 ? '+' : '') + delta + ') steht noch im Formular' : '') + '. Tipp erneut auf „Speichern“, um deine Angaben zu übernehmen.';
@@ -998,19 +1089,20 @@ export function renderInventory(){
   const opts = '<option value="all">Alle Bestände</option><option value="both">Für alle Motorräder</option>' + bikeList().map(x => '<option value="' + esc(x.id) + '">' + esc(titleOf(x)) + '</option>').join('');
   if (filter.innerHTML !== opts) { filter.innerHTML = opts; filter.value = Array.from(filter.options).some(o => o.value === prior) ? prior : 'all'; }
   const which = filter.value, term = $('#inventorySearch').value.trim().toLocaleLowerCase('de'), lowOnly = $('#inventoryLow').checked;
-  const parts = S.parts.filter(p => (which === 'all' || p.bike === 'both' || p.bike === which) && (!term || (p.name || '').toLocaleLowerCase('de').includes(term)) && (!lowOnly || p.qty <= p.min)).sort((a, c) => (a.name || '').localeCompare(c.name || '', 'de'));
+  /* Ab 1.4.0 sucht die Suche auch in Kategorie, Hersteller, Artikelnummer, Spezifikation, Gebinde und Strichcode */
+  const hay = p => [p.name, stock.catName(p.cat), p.sub, p.maker, p.artNo, p.spec, p.pack, p.ean].filter(Boolean).join(' ').toLocaleLowerCase('de');
+  const parts = S.parts.filter(p => (which === 'all' || p.bike === 'both' || p.bike === which) && (!term || hay(p).includes(term)) && (!lowOnly || p.qty <= p.min)).sort((a, c) => (a.name || '').localeCompare(c.name || '', 'de'));
   $('#partsCount').textContent = parts.length ? parts.length + (parts.length === 1 ? ' Teil' : ' Teile') : '';
   $('#partsBody').innerHTML = parts.length ? parts.map(p => {
     const low = p.qty <= p.min;
     const forB = p.bike === 'both' ? 'alle Motorräder' : S.bikes[p.bike] ? titleOf(S.bikes[p.bike]) : 'nicht zugeordnet';
-    return '<div class="part' + (low ? ' low' : '') + '"><div><div class="part-name">' + esc(p.name) + '</div><div class="item-sub">für ' + esc(forB) + ' · nachkaufen ab ' + fmt(p.min, 0) + (low ? ' · <span class="txt-bad">knapp</span>' : '') + '</div></div>'
+    const info = stock.label(p), pic = p.photo ? '<button class="thumb-btn part-pic" type="button" data-photo="' + esc(p.photo.id) + '" aria-label="Bild von ' + esc(p.name) + ' vergrößern">' + imgTag(p.photo.thumbId || p.photo.id, 'Bild von ' + p.name, 'part-thumb', ' loading="lazy"') + '</button>' : '';
+    return '<div class="part' + (low ? ' low' : '') + '"><div class="part-main">' + pic + '<div><div class="part-name">' + esc(p.name) + '</div>' + (info ? '<div class="item-sub">' + esc(info) + '</div>' : '') + '<div class="item-sub">für ' + esc(forB) + ' · nachkaufen ab ' + fmt(p.min, 0) + (low ? ' · <span class="txt-bad">knapp</span>' : '') + '</div></div></div>'
       + '<div class="qty"><button class="mini" type="button" data-partedit="' + esc(p.id) + '" aria-label="' + esc(p.name) + ' bearbeiten">Bearbeiten</button><button class="mini" type="button" data-qty="' + esc(p.id) + '" data-d="-1" aria-label="' + esc(p.name) + ': eins weniger"' + (S.qtyBusy.has(p.id) ? ' disabled' : '') + '>−</button><b aria-label="Anzahl">' + fmt(p.qty, 0) + '</b><button class="mini" type="button" data-qty="' + esc(p.id) + '" data-d="1" aria-label="' + esc(p.name) + ': eins mehr"' + (S.qtyBusy.has(p.id) ? ' disabled' : '') + '>+</button><button class="mini" type="button" data-del="parts/' + esc(p.id) + '" data-arm="Weg?" aria-label="' + esc(p.name) + ' entfernen">×</button></div></div>';
   }).join('') : '<p class="hint">Keine passenden Teile. Ändere die Filter oder füge einen Artikel hinzu.</p>';
-  const pb = $('#pBike'), pv = pb.value;
-  let po = '<option value="both">alle Motorräder</option>' + bikeList().map(x => '<option value="' + esc(x.id) + '">' + esc(bikeName(x)) + '</option>').join('');
-  if (pv && pv !== 'both' && !S.bikes[pv]) po += '<option value="' + esc(pv) + '">Entferntes Motorrad – Zuordnung ändern</option>';
-  if (pb.innerHTML !== po) pb.innerHTML = po;
-  pb.value = pv && Array.from(pb.options).some(o => o.value === pv) ? pv : 'both';
+  hydrate($('#partsBody'));
+  renderPartBike(); stock.fillCats();
+  if (S.cap) stock.renderMatch(S.parts);
 }
 
 function renderGarage(){
@@ -1522,7 +1614,7 @@ export function resetBikeForms(){
   hf.dataset.bike = id; hf.dataset.epoch = S.epoch || '';
   $('#logDetails').open = false; $('#rideDetails').open = false; $('#setupDetails').open = false;
   $('#lDate').value = todayISO(); $('#rDate').value = todayISO(); $('#mDate').value = todayISO();
-  resetLogState(); logMode(); S.editing = {}; S.editBase = {}; S.manMsg = null; S.manBase = null; S.oemDraft = null; S.editSetup = null; S.checkDraft = null;
+  resetLogState(); logMode(); S.editing = {}; S.editBase = {}; S.manMsg = null; S.manBase = null; S.oemDraft = null; S.editSetup = null; S.setupBase = null; S.checkDraft = null; setupMsg('');
   $('#setupFormTitle').textContent = 'Setup speichern'; $('#sSave').textContent = 'Setup speichern'; $('#sCancel').hidden = true;
   R.resetDefectForms();
   ['hours', 'log', 'ride', 'setup', 'part', 'meter', 'defect'].forEach(k => drafts.mark(k));
@@ -1552,6 +1644,10 @@ function fillSetupForm(s, asCopy){
   SF.forEach(([el, k]) => { $('#' + el).value = v2(s[k]); });
   $('#sNote').value = s.note || '';
   S.editSetup = asCopy ? null : s.id;
+  /* Ab 1.4.0 (A1): Grundlage des Entwurfs = gespeicherter Eintrag beim Öffnen (derselbe Datensatz wie das Formular) und
+     die Bestandskennung. Gespeichert wird nur, wenn beides beim Schreiben noch gilt (Prüfung im Speicher). */
+  S.setupBase = asCopy ? null : {id: s.id, epoch: S.epoch || '', raw: setupRaw(s)};
+  setupMsg('');
   const f = $('#setupForm'); f.dataset.bike = S.bike; f.dataset.epoch = S.epoch || ''; parkOp('setupForm'); bumpGen('setupForm');
   $('#setupFormTitle').textContent = asCopy ? 'Neues Setup (Vorlage)' : 'Setup bearbeiten';
   $('#sSave').textContent = asCopy ? 'Setup speichern' : 'Änderungen speichern';
@@ -1561,8 +1657,51 @@ function fillSetupForm(s, asCopy){
   setSection('setup', 'setupDetails');
   if (asCopy) $('#sTrack').focus();
 }
+/* Gespeicherte Felder eines Setups (ohne Kennung und Anzeige-Zusätze); s stammt aus dem Speicher (store.peek) */
+function setupRaw(s){ const o = {}; Object.keys(s || {}).forEach(k => { if (k !== 'id' && !k.startsWith('_')) o[k] = clone(s[k]); }); return o; }
+function setupMsg(t){ const m = $('#sConflict'); if (!m) return; m.textContent = t || ''; m.hidden = !t; }
+/* Neues Setup aus dem eigenen Entwurf (nach Löschen oder Einspielen): nur bewusst mit „Als neues Setup speichern“ */
+function setupAsNew(msg){
+  S.editSetup = null; S.setupBase = null; parkOp('setupForm'); bumpGen('setupForm');
+  const f = $('#setupForm'); f.dataset.bike = S.bike; f.dataset.epoch = S.epoch || '';
+  $('#setupFormTitle').textContent = 'Neues Setup (aus deinem Entwurf)'; $('#sSave').textContent = 'Als neues Setup speichern'; $('#sCancel').hidden = false;
+  $('#setupDetails').open = true; setupMsg(msg); drafts.touch('setup');
+}
+/* Speichern eines vorhandenen Setups abgelehnt (ab 1.4.0): nichts gespeichert, eigene Eingaben bleiben */
+function setupConflict(id, code){
+  const now = store.peek('setups', id);
+  if (code === 'stale') { setupAsNew('Die Daten wurden inzwischen durch eine eingespielte Sicherung ersetzt. Es wurde nichts gespeichert. Deine Eingaben stehen noch hier; mit „Als neues Setup speichern“ legst du sie bewusst neu an, „Abbrechen“ verwirft sie.'); toast('Es wurde nichts gespeichert.'); return; }
+  if (!now) { setupAsNew('Dieses Setup gibt es inzwischen nicht mehr (in einem anderen Fenster gelöscht). Es wurde nichts gespeichert und nichts neu angelegt. Deine Eingaben stehen noch hier; mit „Als neues Setup speichern“ legst du sie bewusst neu an, „Abbrechen“ verwirft sie.'); toast('Es wurde nichts gespeichert.'); return; }
+  /* Felder, die du nicht geändert hast, zeigen jetzt den Stand aus dem anderen Fenster; deine Änderungen bleiben stehen.
+     Genannt wird, was dort anders ist, und wo beide geändert haben. */
+  const base = (S.setupBase && S.setupBase.raw) || {}, took = [], both = [];
+  const shown = (k, v) => v == null || v === '' ? '(leer)' : k === 'track' || k === 'note' ? '„' + v + '“' : v2(v);
+  [['track', 'Strecke', 'sTrack'], ['note', 'Notiz', 'sNote']].concat(SF.map(x => [x[1], x[2], x[0]])).forEach(([k, l, el]) => {
+    if (canon(now[k] == null ? null : now[k]) === canon(base[k] == null ? null : base[k])) return;
+    const inp = $('#' + el), asText = v => k === 'track' || k === 'note' ? (v || '') : v2(v);
+    if (str(inp.value) === str(asText(now[k]))) return;
+    if (str(inp.value) === str(asText(base[k]))) { inp.value = asText(now[k]); took.push(l + ' ' + shown(k, now[k])); }
+    else both.push(l + ': dort ' + shown(k, now[k]) + ', bei dir ' + (inp.value ? (k === 'track' || k === 'note' ? '„' + inp.value + '“' : inp.value) : '(leer)'));
+  });
+  S.setupBase = {id, epoch: S.epoch || '', raw: setupRaw(Object.assign({}, now, {id}))};
+  setupMsg('Dieses Setup wurde inzwischen in einem anderen Fenster geändert. Es wurde nichts gespeichert. ' + (took.length ? 'Übernommen (von dir nicht geändert): ' + took.join(', ') + '. ' : '') + (both.length ? 'An beiden Stellen geändert: ' + both.join('; ') + '. ' : '') + 'Deine Änderungen stehen noch hier; tipp erneut auf „Änderungen speichern“, um sie bewusst zu übernehmen.');
+  drafts.touch('setup'); toast(EDIT_MSG);
+}
+/* Bestand ersetzt (Sicherung eingespielt): geänderten Setup-Entwurf merken und danach als neues Setup wieder anbieten */
+export function keepSetupDraft(){
+  if (!drafts.isDirty('setup') || !$('#setupDetails').open) return null;
+  const f = $('#setupForm'), v = {sTrack: $('#sTrack').value, sNote: $('#sNote').value};
+  SF.forEach(([el]) => { v[el] = $('#' + el).value; });
+  return {bike: f.dataset.bike, values: v};
+}
+export function restoreSetupDraft(k){
+  if (!k || !S.bikes[k.bike] || S.bike !== k.bike) return false;
+  Object.keys(k.values).forEach(el => { const i = $('#' + el); if (i) i.value = k.values[el]; });
+  setupAsNew('Die Daten wurden inzwischen durch eine eingespielte Sicherung ersetzt. Dein Setup-Entwurf wurde nicht gespeichert und steht noch hier; mit „Als neues Setup speichern“ legst du ihn bewusst neu an, „Abbrechen“ verwirft ihn.');
+  return true;
+}
 function resetSetupForm(){
-  const f = $('#setupForm'); f.reset(); f.dataset.bike = S.bike; f.dataset.epoch = S.epoch || ''; S.editSetup = null;
+  const f = $('#setupForm'); f.reset(); f.dataset.bike = S.bike; f.dataset.epoch = S.epoch || ''; S.editSetup = null; S.setupBase = null; setupMsg('');
   parkOp('setupForm');
   $('#setupFormTitle').textContent = 'Setup speichern'; $('#sSave').textContent = 'Setup speichern'; $('#sCancel').hidden = true;
   drafts.mark('setup');
@@ -1657,7 +1796,8 @@ export async function onClick(t){
       const raw = store.peek('parts', id);
       if (!raw) { toast('Diesen Artikel gibt es inzwischen nicht mehr.'); return; }
       const p = Object.assign(clone(raw), {id});
-      partEditMode(p, p.qty); $('#pName').value = p.name; $('#pQty').value = p.qty; $('#pMin').value = p.min; $('#pBike').value = p.bike;
+      stock.dropCap(); stock.dropImg(); S.fill = null; stock.clearMarks();
+      partEditMode(p, p.qty); $('#pName').value = p.name; $('#pQty').value = p.qty; $('#pMin').value = p.min; renderPartBike(); $('#pBike').value = p.bike; stock.fillExtra(p);
       $('#partForm').closest('details').open = true; drafts.mark('part'); $('#pName').focus();
     });
     return true;
@@ -1665,6 +1805,13 @@ export async function onClick(t){
   if (t.id === 'addCancel') { closeDraft('addBikeForm'); R.navigate({page: 'home'}, {replace: true}); return true; }
   if (t.id === 'abPhotoDrop') { dropAddPhoto(); $('#abPhotoBox').innerHTML = addPhotoInner(); return true; }
   if (t.id === 'pCancel') { if (!(S.ops.partForm && S.ops.partForm.saving)) { parkOp('partForm'); closeDraft('partForm'); } return true; }
+  /* Artikel aus einem Foto (ab 1.4.0) */
+  if (t.id === 'capStop') { if (S.cap && S.cap.state === 'reading') { ocr.cancel(); S.cap.state = 'cancelled'; partModeUi(); } return true; }
+  if (t.id === 'capRerun') { if (S.cap) runRecognition(S.cap); return true; }
+  if (t.id === 'capNoImg' || t.id === 'capKeepImg') { if (S.cap) { S.cap.noImage = t.id === 'capNoImg'; partModeUi(); drafts.touch('part'); } return true; }
+  if (t.dataset.capfill) { if (!(S.ops.partForm && S.ops.partForm.saving)) openFill(t.dataset.capfill); return true; }
+  if (t.id === 'pImgDel') { stock.removeImg(); partModeUi(); drafts.touch('part'); return true; }
+  if (t.id === 'pImgDrop') { stock.dropImg(); partModeUi(); drafts.touch('part'); return true; }
   /* Bereich, Formular oder Motorrad wechseln: bei ungespeicherten Eingaben erst nachfragen (drafts.guard) */
   if (t.dataset.v) { if (t.dataset.v !== S.section) R.guard(() => setSection(t.dataset.v)); return true; }
   if (t.dataset.goto) {
@@ -1754,7 +1901,7 @@ export async function onClick(t){
   /* Setup erst nach der Rückfrage auflösen (ab 1.3.2, wie Lager und Mängel) */
   if (t.dataset.editsetup || t.dataset.copysetup) {
     const id = t.dataset.editsetup || t.dataset.copysetup, copy = !t.dataset.editsetup;
-    if (S.setups.some(x => x.id === id)) drafts.begin(() => { const s = S.setups.find(x => x.id === id); if (s) fillSetupForm(s, copy); else toast('Dieses Setup gibt es inzwischen nicht mehr.'); });
+    if (S.setups.some(x => x.id === id)) drafts.begin(() => { const raw = store.peek('setups', id); if (raw) fillSetupForm(Object.assign(clone(raw), {id}), copy); else toast('Dieses Setup gibt es inzwischen nicht mehr.'); });
     return true;
   }
   if (t.dataset.done) {
@@ -1806,6 +1953,7 @@ export async function onClick(t){
 }
 
 export function onInput(t){
+  if (S.cap && t.closest && t.closest('#partForm')) stock.onInput(t);
   if (t.id === 'abModel') {
     const tp = MODEL_TPL[$('#abBrand').value + '|' + t.value.trim().toLowerCase()];
     if (tp && TEMPLATES[tp]) { $('#abTpl').value = tp; $('#abUnit').value = TEMPLATES[tp].unit; }
@@ -1824,6 +1972,10 @@ export function onInput(t){
 }
 
 export function onChange(t){
+  /* Artikel aus einem Foto: offene Eingaben im Teileformular erst klären (Rückfrage), dann das Bild übernehmen */
+  if (t.id === 'capCam' || t.id === 'capPick') { const file = t.files && t.files[0]; t.value = ''; if (file) drafts.begin(() => startCapture(file)); return true; }
+  if (t.id === 'pImgFile') { const file = t.files && t.files[0]; t.value = ''; if (file) { stock.setImg(file); $('#pMore').open = true; partModeUi(); drafts.touch('part'); } return true; }
+  if (t.id === 'pCat') { stock.fillSubs(); stock.onInput(t); return true; }
   if (t.dataset && t.dataset.check != null) {
     const b = curBike(); if (!b) return true;
     const s = checkState(b), id = t.dataset.check;
@@ -1879,44 +2031,76 @@ export async function onSubmit(f, busy){
   if (f.id === 'partForm') {
     const name = str($('#pName').value).slice(0, 120);
     if (!name) throw new VErr($('#pName'), 'Gib dem Teil einen Namen.');
-    const qty = fieldNum('pQty', 'Anzahl', {int: true, min: 0, max: 99999}) || 0;
+    const pid0 = f.dataset.part || '', fill = S.fill && S.fill.pid === pid0 && pid0 ? S.fill : null, capMode = !!S.cap && !pid0;
+    /* Artikel aus einem Foto und Auffüllen: die Anzahl gibst du selbst an (nie aus dem Bild) */
+    if ((capMode || fill) && !str($('#pQty').value)) throw new VErr($('#pQty'), fill ? 'Gib an, wie viele dazukommen.' : 'Gib an, wie viele Packungen oder Stück du einlagerst. Racebook zählt keine abgebildeten Teile.');
+    const qty = fieldNum('pQty', fill ? 'Zugang' : 'Anzahl', {int: true, min: fill ? 1 : 0, max: 99999}) || 0;
     const min = fieldNum('pMin', 'Nachkaufen ab', {int: true, min: 0, max: 99999}) || 0;
     const pb = $('#pBike').value;
+    if (capMode && !pb) throw new VErr($('#pBike'), 'Wähle, für welches Motorrad der Artikel ist (oder „alle Motorräder“). Racebook ordnet das nicht selbst zu.');
     if (pb !== 'both' && !S.bikes[pb]) throw new VErr($('#pBike'), 'Dieses Motorrad gibt es nicht mehr. Bitte die Zuordnung wählen.');
     const forBike = pb;
+    const extra = stock.readExtra();
     if (f.dataset.part) {
       /* Vorhandenen Posten ändern: dieselbe ID, Anzahl als Änderung gegenüber dem Bestand beim Öffnen */
       const pid = f.dataset.part, base = Number(f.dataset.base) || 0;
       const ex = S.parts.find(x => x.id === pid);
       if (!ex) { closeDraft('partForm'); toast('Dieses Teil gibt es inzwischen nicht mehr. Leg es bei Bedarf neu an.'); return true; }
       /* Nur was gegenüber dem Stand beim Öffnen geändert wurde, und nur auf dieser Grundlage (Prüfung im Speicher).
-         Fremde Änderungen an anderen Angaben bleiben; die Anzahl zählt als Änderung (Einkäufe anderswo zählen mit). */
-      const pb0 = S.partBase && S.partBase.id === pid ? S.partBase : {id: pid, name: ex.name, bike: ex.bike, min: ex.min};
-      const o = opFor('partForm', '', 'parts', pid, [pid, base, name, forBike, qty, min, canon(pb0)].join('|')); if (o.saving) return true;
+         Fremde Änderungen an anderen Angaben bleiben; die Anzahl zählt als Änderung (Einkäufe anderswo zählen mit).
+         Ab 1.4.0 ebenso Artikelangaben und Bild (neues Bild in derselben Transaktion). */
+      const pb0 = S.partBase && S.partBase.id === pid ? S.partBase : {id: pid, name: ex.name, bike: ex.bike, min: ex.min, raw: Object.assign(store.peek('parts', pid) || {}, {id: pid})};
+      const img = S.partImg;
+      const o = opFor('partForm', '', 'parts', pid, [pid, base, name, forBike, qty, min, canon(extra), img ? img.kind + img.id : '', fill ? 'fill' : '', canon(pb0)].join('|')); if (o.saving) return true;
       const g = S.gen.partForm || 0;
-      if (!o.payload) {
-        const set = {}, guard = {};
-        if (name !== pb0.name) { set.name = name; guard.name = pb0.name; }
-        if (forBike !== pb0.bike) { set.bike = forBike; guard.bike = pb0.bike; }
-        if (min !== pb0.min) { set.min = min; guard.min = pb0.min; }
-        o.payload = {id: pid, add: qty - base, set, guard}; o.adj = true; o.label = 'Teil ' + name; o.quietFail = true;
-      }
       busy(true);
-      const r = await execOp('partForm', o, () => store.sAdjustR(pid, o.op, o.payload, {epoch: o.epoch}));
+      const r = await execOp('partForm', o, async () => {
+        if (!o.payload) {
+          const set = {}, guard = {}, raw0 = pb0.raw || {};
+          if (name !== pb0.name) { set.name = name; guard.name = pb0.name; }
+          if (forBike !== pb0.bike) { set.bike = forBike; guard.bike = pb0.bike; }
+          if (min !== pb0.min) { set.min = min; guard.min = pb0.min; }
+          /* Artikelangaben nur, wenn das Formular sie für genau diesen Artikel gezeigt hat (zusätzliche Absicherung, PR 2) */
+          if (f.dataset.extraFor === pid) stock.EXTRA.forEach(k => { const before = raw0[k] == null ? '' : String(raw0[k]); if (extra[k] !== before) { set[k] = extra[k]; guard[k] = raw0[k] === undefined ? null : raw0[k]; } });
+          if (img) {
+            guard.photo = raw0.photo === undefined ? null : raw0.photo;
+            if (img.kind === 'remove') set.photo = null;
+            else {
+              try { const m = await makeArticlePhoto(img.file); set.photo = m.photo; o.files = m.files; }
+              catch (e) { S.lastErr = e; o.quietFail = true; toast('Das Bild konnte nicht gelesen werden. Es wurde nichts gespeichert.'); return 'fail'; }
+            }
+          }
+          o.payload = {id: pid, add: fill ? qty : qty - base, set, guard}; o.adj = true; o.label = 'Teil ' + name; o.quietFail = true;
+        }
+        return store.sAdjustR(pid, o.op, Object.assign({}, o.payload, {files: o.files}), {epoch: o.epoch});
+      });
       if (r === 'fail' && S.lastErr && S.lastErr.code === 'changed') { await partConflict(pid, o.payload, base, qty, pb0); return true; }
-      if (r === 'fail') toast(errText(S.lastErr) + ' Es wurde nichts gespeichert.');
+      if (r === 'fail' && o.payload != null) toast(errText(S.lastErr) + ' Es wurde nichts gespeichert.');
       if (r === 'ok') {
-        const now = store.peek('parts', pid);
+        const now = store.peek('parts', pid), oldPic = o.payload && o.payload.set && 'photo' in o.payload.set && pb0.raw && pb0.raw.photo ? pb0.raw.photo : null;
+        if (oldPic) cleanupFiles(payloadFiles({photo: oldPic}));
         if ((S.gen.partForm || 0) === g) closeDraft('partForm');
-        toast(now && now.qty !== qty ? 'Gespeichert. „' + name + '“: jetzt ' + fmt(now.qty, 0) + ' im Vorrat, weil der Bestand inzwischen auch in einem anderen Fenster geändert wurde.' : 'Teil gespeichert.');
+        if (fill) toast('„' + name + '“ aufgefüllt: jetzt ' + fmt(now ? now.qty : base + qty, 0) + ' im Vorrat.');
+        else toast(now && now.qty !== qty ? 'Gespeichert. „' + name + '“: jetzt ' + fmt(now.qty, 0) + ' im Vorrat, weil der Bestand inzwischen auch in einem anderen Fenster geändert wurde.' : 'Teil gespeichert.');
       }
       return true;
     }
-    const o = opFor('partForm', '', 'parts', null, [name, forBike, qty, min].join('|')); if (o.saving) return true;
+    const imgFile = stock.newImageFile();
+    const o = opFor('partForm', '', 'parts', null, [name, forBike, qty, min, canon(extra), imgFile ? stock.sig() : ''].join('|')); if (o.saving) return true;
     const g = S.gen.partForm || 0;
-    if (!o.payload) { o.payload = canonDoc('parts', {name, bike: forBike, qty, min, created: o.created}); o.label = 'Teil ' + name; }
     busy(true);
-    const r = await execOp('partForm', o, () => store.sSetR('parts', o.op, o.payload, null, {epoch: o.epoch}));
+    const r = await execOp('partForm', o, async () => {
+      if (!o.payload) {
+        /* Erster Versuch: Bild verkleinern und Nutzdaten einfrieren. Eine Wiederholung nutzt dasselbe Bild. */
+        let photo = null;
+        if (imgFile) {
+          try { const m = await makeArticlePhoto(imgFile); photo = m.photo; o.files = m.files; }
+          catch (e) { S.lastErr = e; o.quietFail = true; toast('Das Bild konnte nicht gelesen werden. Der Artikel wurde nicht gespeichert; tipp auf „Bild nicht speichern“ oder wähle ein anderes Bild.'); return 'fail'; }
+        }
+        o.payload = canonDoc('parts', Object.assign({name, bike: forBike, qty, min, created: o.created, photo}, extra)); o.label = 'Teil ' + name;
+      }
+      return store.sSetR('parts', o.op, o.payload, o.files, {epoch: o.epoch});
+    });
     if (r === 'ok') { if ((S.gen.partForm || 0) === g) closeDraft('partForm'); toast('Teil hinzugefügt.'); }
     return true;
   }
@@ -2025,7 +2209,25 @@ export async function onSubmit(f, busy){
     const g = S.gen.setupForm || 0;
     busy(true);
     let ok;
-    if (S.editSetup) ok = await sSet('setups', S.editSetup, canonDoc('setups', data));
+    if (S.editSetup) {
+      /* Ab 1.4.0 (A1): nur auf der Grundlage beim Öffnen und mit der Bestandskennung des Entwurfs; ein gelöschter Eintrag
+         wird nicht neu angelegt (Änderung statt Ersetzen), ein eingespielter Bestand nicht überschrieben */
+      const id = S.editSetup, sb = S.setupBase && S.setupBase.id === id ? S.setupBase : {epoch: f.dataset.epoch || S.epoch || '', raw: setupRaw(Object.assign({}, store.peek('setups', id), {id}))};
+      const patch = canonDoc('setups', data);
+      const r = await flow(() => store.commitR([{coll: 'setups', id, patch, guard: sb.raw}], null, 'setup-edit', {epoch: sb.epoch}));
+      ok = r === 'ok';
+      if (r === 'fail' && S.lastErr && ['changed', 'not_found', 'stale'].includes(S.lastErr.code)) {
+        const code = S.lastErr.code;
+        await store.reloadAll().catch(() => {});
+        if ((S.gen.setupForm || 0) !== g || S.editSetup !== id) return true;
+        /* Wiederholung nach unklarem Ergebnis: steht genau diese Änderung schon im Speicher, war sie gespeichert */
+        const now = store.peek('setups', id), mine = Object.assign({}, patch); delete mine.updated;
+        if (code === 'changed' && now && subOf(mine, now)) { closeDraft('setupForm'); toast('Die Änderung war schon gespeichert.'); return true; }
+        setupConflict(id, code); return true;
+      }
+      if (r === 'fail') toast(errText(S.lastErr) + ' Es wurde nichts gespeichert.');
+      else if (!ok) toast(UNCLEAR_MSG);
+    }
     else {
       const o = opFor('setupForm', b.id, 'setups', null, canon(Object.assign({}, data, {updated: null}))); if (o.saving) return true;
       if (!o.payload) { o.payload = canonDoc('setups', data); o.label = 'Setup ' + data.track; }
@@ -2045,6 +2247,8 @@ export async function onSubmit(f, busy){
 
 /* Statische Formularteile einmal füllen */
 export function initBikeForms(){
+  /* Teileformular von Anfang an vollständig (Kategorien, „Bild hinzufügen“), nicht erst nach einem anderen Ablauf (PR 2, P2) */
+  stock.fillCats(); partModeUi();
   $('#rGround').innerHTML = '<option value="">–</option>' + GROUNDS.map(g => '<option>' + g + '</option>').join('');
   $('#rWeather').innerHTML = '<option value="">–</option>' + WEATHER.map(g => '<option>' + g + '</option>').join('');
   $('#rFeel').innerHTML = [1, 2, 3, 4, 5].map(i => '<label><input type="radio" name="feel" value="' + i + '"><span>' + i + '</span><span class="sr"> von 5</span></label>').join('');
@@ -2071,8 +2275,8 @@ function registerDrafts(){
   drafts.register({key: 'ride', label: 'Fahrt', root: () => $('#rideForm'), isOpen: () => $('#rideDetails').open, save: submitOf('rideForm'), discard: () => { parkOp('rideForm'); closeDraft('rideForm'); }, reveal: show('rides', 'rideDetails', 'rideDetails')});
   drafts.register({key: 'setup', label: 'Fahrwerk-Setup', root: () => $('#setupForm'), extra: () => S.editSetup || '', isOpen: () => $('#setupDetails').open, save: submitOf('setupForm'), discard: () => { parkOp('setupForm'); closeDraft('setupForm'); }, reveal: show('setup', 'setupDetails', 'setupDetails')});
   const partDet = () => { const f = $('#partForm'); return f ? f.closest('details') : null; };
-  drafts.register({key: 'part', label: 'Teil', root: () => $('#partForm'), extra: () => $('#partForm').dataset.part || '', save: submitOf('partForm'), discard: () => { parkOp('partForm'); closeDraft('partForm'); },
-    isOpen: () => !!$('#partForm').dataset.part || !!(partDet() && partDet().open), close: () => { parkOp('partForm'); closeDraft('partForm'); const d = partDet(); if (d) d.open = false; }, reveal: show('inventory', 'g-parts')});
+  drafts.register({key: 'part', label: 'Teil', root: () => $('#partForm'), extra: () => ($('#partForm').dataset.part || '') + stock.sig(), save: submitOf('partForm'), discard: () => { parkOp('partForm'); closeDraft('partForm'); },
+    isOpen: () => !!$('#partForm').dataset.part || !!S.cap || !!(partDet() && partDet().open), close: () => { parkOp('partForm'); closeDraft('partForm'); const d = partDet(); if (d) d.open = false; }, reveal: show('inventory', 'g-parts')});
   drafts.register({key: 'meter', label: 'Zählerwechsel', root: () => $('#meterForm'), save: submitOf('meterForm'), discard: () => { parkOp('meterForm'); closeDraft('meterForm'); },
     isOpen: () => !!($('#g-meter') && $('#g-meter').open), close: () => { parkOp('meterForm'); closeDraft('meterForm'); $('#g-meter').open = false; }, reveal: show('vehicle', 'g-meter', 'g-meter')});
   [['bike', 'Motorrad bearbeiten', 'bikeForm', 'g-bike'], ['tc', 'Reifen & Kette', 'tcForm', 'g-tc'], ['oil', 'Öle & Flüssigkeiten', 'oilForm', 'g-oil'], ['int', 'Wartungsintervalle', 'intForm', 'g-int'], ['oem', 'Herstellervorgaben', 'oemForm', 'oemBody']].forEach(([k, label, id, anchor]) => {

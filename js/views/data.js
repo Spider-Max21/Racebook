@@ -9,6 +9,7 @@ import {buildBackup, markBackup, readBackupFile, readJsonBackup, applyDraft, res
 import {sweepOrphans, waitIdle, cleanupFiles, payloadFiles} from '../ops.js';
 import {$, toast, errText, arm, fmtSize, icon} from '../ui.js';
 import {R} from '../registry.js';
+import * as ocr from '../ocr.js';
 
 const SRC = {zip: 'ZIP-Sicherung von Racebook', v8: 'Sicherung aus der bisherigen Racebook-App (JSON)', 'v8-local': 'bisherige Racebook-Version auf diesem Gerät'};
 
@@ -148,7 +149,16 @@ export function renderData(){
   parts.push(storageHTML());
   const sw = 'serviceWorker' in navigator ? (navigator.serviceWorker.controller ? 'bereit, die App funktioniert auch ohne Netz' : 'noch nicht bereit, einmal neu laden') : 'nicht unterstützt';
   parts.push('<section class="card"><h2>App</h2><dl class="kv"><dt>Version</dt><dd>' + APP_VERSION + '</dd><dt>Offline</dt><dd>' + sw + '</dd></dl><div class="row"><button class="btn ghost" type="button" id="updateCheck">Nach Aktualisierung suchen</button><a class="btn ghost" href="#/hilfe" data-nav="help">Hilfe</a></div></section>');
+  parts.push(ocrHTML());
   el.innerHTML = parts.join('');
+  if (S.ocrReady == null) ocr.offlineReady().then(v => { S.ocrReady = v; if (v) renderData(); });
+}
+/* Texterkennung für „Artikel aus einem Foto“ (ab 1.4.0): läuft auf dem Gerät; einmal laden, dann auch offline */
+function ocrHTML(){
+  const st = S.ocrLoading ? '<p class="hint thinking" role="status">Wird geladen …</p>' : S.ocrReady ? '<p>Bereit, auch ohne Netz.</p>' : '<p>Noch nicht auf diesem Gerät. Sie wird beim ersten Erkennen geladen (etwa 4,5 MB, einmalig) oder hier vorab.</p>';
+  return '<section class="card" id="ocrCard"><h2>Texterkennung im Lager</h2>' + st
+    + '<p class="hint">Liest beim Erfassen eines Artikels aus einem Foto den Text auf dem Etikett, direkt auf diesem Gerät. Bilder und Texte werden dabei an keinen Dienst geschickt.</p>'
+    + (S.ocrReady || S.ocrLoading ? '' : '<div class="row"><button class="btn" type="button" id="ocrPrefetch">Für offline laden</button></div>') + '</section>';
 }
 
 /* ---------- Sicherung erstellen ---------- */
@@ -241,6 +251,12 @@ async function doImport(){
 }
 
 export async function onClick(t){
+  if (t.id === 'ocrPrefetch') {
+    S.ocrLoading = true; renderData();
+    try { await ocr.prefetch(); S.ocrReady = await ocr.offlineReady(); toast(S.ocrReady ? 'Texterkennung geladen, sie funktioniert jetzt auch ohne Netz.' : 'Geladen. Ohne Netz steht sie bereit, sobald die App offline bereit ist (einmal neu laden).'); }
+    catch (e) { toast('Die Texterkennung konnte nicht geladen werden. Bitte mit Internetverbindung erneut versuchen.'); }
+    S.ocrLoading = false; renderData(); return true;
+  }
   if (t.id === 'exportBtn' || t.id === 'exportBefore') { await doExport('download'); return true; }
   if (t.id === 'shareBtn') { await doExport('share'); return true; }
   if (t.id === 'shareNow') { await shareNow(); return true; }

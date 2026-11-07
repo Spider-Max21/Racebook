@@ -1,0 +1,27 @@
+Texterkennung auf dem Gerät für „Artikel aus einem Foto“ (Racebook ab 1.4.0)
+
+Unveränderte Dateien aus npm (nicht neu gebaut, nicht verändert). Racebook lädt sie erst beim ersten Erkennen von
+derselben Adresse wie die App; sie schicken nichts an andere Server (Pfade in js/ocr.js fest auf diesen Ordner gesetzt,
+Zwischenspeicher der Sprachdaten in IndexedDB abgeschaltet, Service Worker hält sie danach offline bereit).
+
+Herkunft
+- tesseract.min.js, worker.min.js           npm tesseract.js@7.0.0 (dist/), Lizenz Apache-2.0 (LICENSE-tesseract.js.md)
+- tesseract-core-simd-lstm.js/.wasm,
+  tesseract-core-lstm.js/.wasm              npm tesseract.js-core@7.0.0, Lizenz Apache-2.0 (LICENSE-tesseract.js-core.txt);
+                                            WebAssembly-Fassung von Tesseract OCR (Apache-2.0) mit Leptonica (BSD-2-Clause)
+                                            und den darin enthaltenen Bildbibliotheken. Je Gerät wird nur eine Variante geladen
+                                            (mit SIMD, sonst ohne).
+- deu.traineddata.gz                        npm @tesseract.js-data/deu@1.0.0, Ordner 4.0.0_best_int (deutsche Sprachdaten aus
+                                            tesseract-ocr/tessdata, Apache-2.0; npm-Paket MIT)
+
+Größe: zusammen etwa 7,1 MB im Paket; ein Gerät lädt etwa 4,4 MB (eine Kernvariante, Sprachdaten, Skripte).
+Aktualisieren: nur zusammen mit tests/lager_foto.py (echte Erkennung) und dem Cache-Namen OCR_CACHE in sw.js.
+
+SHA-256
+000c27d9cd0def655f77b36c72a389c0ab13793aa31cb4d7aab56d09c0afbc7e  tesseract.min.js
+576b7df7e3393e137e51849357c9adb53fe7ac1bb69bfa06cf3d61520f182c6d  worker.min.js
+e48e2f02ddae3716c8dd24bf41cd290d4efa96892d689cdc4013c2545d63f469  tesseract-core-simd-lstm.js
+34e8d50cac216427d86bf397d610fdd9f49492539bbcdfbfccc4eda20c810bea  tesseract-core-simd-lstm.wasm
+6510efc4e8b45c5465df30679b9911ffe0071cd2ee982fa064e6f5136ef2de85  tesseract-core-lstm.js
+66b17df6e20c5329a17ffa9c202a47eaa3e32500b253d4c7f38e7f2bc01457c3  tesseract-core-lstm.wasm
+306c4280d0cbed46fbff727486bd43b92730181bae80f56941a091f363bdf28b  deu.traineddata.gz

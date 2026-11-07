@@ -75,6 +75,20 @@ export async function makePhoto(file){
   } finally { dec.close(); }
 }
 
+/* Artikelbild im Lager (ab 1.4.0): ganzes Bild, kleiner als Fotos im Logbuch, plus Vorschaubild */
+export const ARTICLE_MAX = 1200, ARTICLE_THUMB = 240;
+export async function makeArticlePhoto(file){
+  const dec = await decodeImage(file);
+  try {
+    const main = await render(dec, null, ARTICLE_MAX, ARTICLE_MAX, 0.8);
+    const th = await render(dec, null, ARTICLE_THUMB, ARTICLE_THUMB, 0.75);
+    const name = String(file.name || 'artikel').slice(0, 120);
+    const a = await fileRec(main.blob, {w: main.w, h: main.h, name, role: 'article'});
+    const b = await fileRec(th.blob, {w: th.w, h: th.h, name: 'vorschau-' + name, role: 'thumb'});
+    return {photo: {id: a.id, thumbId: b.id}, files: [a, b]};
+  } finally { dec.close(); }
+}
+
 /* Motorradfoto: gewählter Ausschnitt im Format 4:3 */
 export async function makeBikePhoto(dec, crop, name){
   const main = await render(dec, crop, PHOTO_MAX, Math.round(PHOTO_MAX / BIKE_RATIO), 0.84);

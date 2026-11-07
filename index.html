@@ -199,6 +199,7 @@
       <details class="card form-card" id="setupDetails">
         <summary><h2 id="setupFormTitle">Setup speichern</h2></summary>
         <form id="setupForm" class="stack">
+          <p class="warnbox" id="sConflict" role="alert" hidden></p>
           <div class="f"><label for="sTrack">Strecke</label><input id="sTrack" list="trackList" autocomplete="off" placeholder="z. B. Hartboden-Enduro, Sandstrecke"></div>
           <fieldset><legend>Gabel</legend>
             <div class="grid">
@@ -301,15 +302,36 @@
       <div class="card" id="g-parts">
         <div class="card-h"><h2>Lagerbestand</h2><span class="tag" id="partsCount"></span></div>
         <div id="partsBody"></div>
+        <div class="capture-row" id="captureRow">
+          <label class="btn" for="capCam"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Foto aufnehmen</label><input type="file" id="capCam" accept="image/*" capture="environment" class="sr-file" data-nodirty>
+          <label class="btn" for="capPick"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4z"/><path d="M4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="8.5" r="1.5"/></svg>Bild auswählen</label><input type="file" id="capPick" accept="image/*" class="sr-file" data-nodirty>
+          <p class="hint">Artikel aus einem Foto oder Bildschirmfoto erfassen: Racebook liest den Text auf dem Etikett direkt auf diesem Gerät und schlägt die Angaben vor. Du prüfst alles und bestätigst Anzahl und Motorrad selbst.</p>
+        </div>
         <details class="form-card" style="margin-top:10px">
           <summary><h3 id="partFormTitle">Teil hinzufügen</h3></summary>
           <form id="partForm" class="grid">
             <p class="hint f full" id="partEditHint" hidden></p>
             <p class="warnbox f full" id="partConflict" role="alert" hidden></p>
-            <div class="f full"><label for="pName">Teil</label><input id="pName" autocomplete="off" placeholder="z. B. Ölfilter, Zündkerze, Bremsbeläge vorn"></div>
+            <div class="f full" id="pPhotoBox" hidden></div>
+            <div class="f full" id="pMatch" hidden></div>
+            <div class="f full"><label for="pName">Teil <span class="mark" data-mark="name"></span></label><input id="pName" autocomplete="off" placeholder="z. B. Ölfilter, Zündkerze, Bremsbeläge vorn"></div>
             <div class="f full"><label for="pBike">Für</label><select id="pBike"></select></div>
-            <div class="f"><label for="pQty">Anzahl</label><input id="pQty" inputmode="numeric" value="1"></div>
+            <div class="f"><label for="pQty" id="pQtyLabel">Anzahl</label><input id="pQty" inputmode="numeric" value="1"></div>
             <div class="f"><label for="pMin">Nachkaufen ab</label><input id="pMin" inputmode="numeric" value="1"></div>
+            <p class="hint f full" id="pQtyHint" hidden></p>
+            <details class="f full part-more" id="pMore">
+              <summary>Weitere Angaben <span class="hint">Kategorie, Hersteller, Artikelnummer, Spezifikation, Gebinde, Bild</span></summary>
+              <div class="grid">
+                <div class="f"><label for="pCat">Kategorie <span class="mark" data-mark="cat"></span></label><select id="pCat"></select></div>
+                <div class="f"><label for="pSub">Unterkategorie <span class="mark" data-mark="sub"></span></label><input id="pSub" list="pSubList" autocomplete="off" maxlength="60"><datalist id="pSubList"></datalist></div>
+                <div class="f"><label for="pMaker">Hersteller <span class="mark" data-mark="maker"></span></label><input id="pMaker" autocomplete="off" maxlength="60"></div>
+                <div class="f"><label for="pArt">Artikelnummer <span class="mark" data-mark="artNo"></span></label><input id="pArt" autocomplete="off" maxlength="60"></div>
+                <div class="f full"><label for="pSpec">Spezifikation <span class="mark" data-mark="spec"></span></label><input id="pSpec" autocomplete="off" maxlength="200" placeholder="z. B. 10W-50, JASO MA2"></div>
+                <div class="f"><label for="pPack">Gebindegröße <span class="mark" data-mark="pack"></span></label><input id="pPack" autocomplete="off" maxlength="40" placeholder="z. B. 4 L, 1 Satz"></div>
+                <div class="f"><label for="pEan">Strichcode <span class="mark" data-mark="ean"></span></label><input id="pEan" inputmode="numeric" autocomplete="off" maxlength="14"></div>
+                <div class="f full" id="pImgBox"></div>
+              </div>
+            </details>
             <div class="f full row"><button class="btn primary" type="submit" id="pSave">Hinzufügen</button><button class="btn ghost" type="button" id="pCancel" hidden>Abbrechen</button></div>
           </form>
         </details>

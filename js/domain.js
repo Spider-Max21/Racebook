@@ -6,6 +6,7 @@ import {esc, pad, str, fmt, eur, uid, clone, reEsc, validId, safeUrl, parseNum, 
 import {navigationOf} from './preferences.js';
 import {S, COLLS, bikeList, curBike, U, bikeName} from './state.js';
 import {parseWork, ivProposal, workPos, workEntry} from './work.js';
+import {CAT_KEYS} from './label.js';
 export {COLLS};
 
 /* ---------- Konstanten ---------- */
@@ -48,8 +49,11 @@ export const ZIP_FORMAT = 'racebook-backup';
    (Felder checklist, favs). 1.1.x kennt diese Felder nicht und würde sie beim Einlesen still verwerfen; deshalb lehnt es
    Version 8 als „neuer“ ab.
    Ab 1.3.0 Version 9, wenn eine eigene Menübelegung (navigation) gespeichert ist; 1.2.x lehnt Version 9 ab.
-   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7 bzw. 8. */
-export const ZIP_VERSION = 9;
+   Ab 1.4.0 Version 10, wenn ein Lagerartikel Artikelangaben oder ein Artikelbild hat (Felder cat, sub, maker, artNo,
+   spec, pack, ean, photo). 1.3.x kennt sie nicht und würde sie beim Einlesen still verwerfen; deshalb lehnt es Version 10 ab.
+   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8 bzw. 9. */
+export const ZIP_VERSION = 10;
+export const ZIP_VERSION_NAV = 9;
 export const ZIP_VERSION_V8 = 8;
 export const ZIP_VERSION_POS = 7;
 export const ZIP_VERSION_METER = 6;
@@ -67,6 +71,10 @@ export const needsV7 = next => {
 export const hasV8Log = l => !!l && typeof l === 'object' && (l.work != null || l.orig != null || l.edited != null);
 export const hasV8Bike = b => !!b && typeof b === 'object' && (b.checklist != null || b.favs != null);
 export const needsV8 = next => Object.values((next && next.log) || {}).some(hasV8Log) || Object.values((next && next.bikes) || {}).some(hasV8Bike);
+/* Version 10: Lagerartikel mit Angaben oder Bild, die erst ab 1.4.0 gespeichert werden */
+export const PART_V10 = ['cat', 'sub', 'maker', 'artNo', 'spec', 'pack', 'ean', 'photo'];
+export const hasV10Part = p => !!p && typeof p === 'object' && PART_V10.some(k => p[k] != null && p[k] !== '');
+export const needsV10 = next => Object.values((next && next.parts) || {}).some(hasV10Part);
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
 const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
@@ -302,8 +310,14 @@ export function cleanDoc(coll, x, strict, where){
     photos: h.a(x.photos, 'Fotos').filter(p => p && typeof p === 'object' && validId(p.id)).slice(0, 6).map(p => ({id: p.id, thumbId: validId(p.thumbId) ? p.thumbId : ''})),
     doneDate: h.d(x.doneDate, 'Erledigt am'), repairs: h.n(x.repairs, 'Reparaturen', {int:true, min:0, max:999}) || 0,
     repairLogId: h.id(x.repairLogId, 'Reparatureintrag', {opt:true}), created: h.n(x.created, 'Zeitstempel', {int:true, min:0}) || 0};
-  if (coll === 'parts') return {name: h.s(x.name, 'Teil', {req:true, max:120}), bike: x.bike === 'both' ? 'both' : bike,
-    qty: h.n(x.qty, 'Anzahl', {int:true, min:0, max:99999}) || 0, min: h.n(x.min, 'Nachkaufen ab', {int:true, min:0, max:99999}) || 0, created: h.n(x.created, 'Zeitstempel', {int:true, min:0}) || 0};
+  if (coll === 'parts') {
+    /* Ab 1.4.0: Artikelangaben (Kategorie, Hersteller, Artikelnummer, Spezifikation, Gebinde, Strichcode) und Artikelbild */
+    const ph = x.photo && typeof x.photo === 'object' && validId(x.photo.id) ? {id: x.photo.id, thumbId: validId(x.photo.thumbId) ? x.photo.thumbId : ''} : null;
+    return {name: h.s(x.name, 'Teil', {req:true, max:120}), bike: x.bike === 'both' ? 'both' : bike,
+      qty: h.n(x.qty, 'Anzahl', {int:true, min:0, max:99999}) || 0, min: h.n(x.min, 'Nachkaufen ab', {int:true, min:0, max:99999}) || 0, created: h.n(x.created, 'Zeitstempel', {int:true, min:0}) || 0,
+      cat: h.one(x.cat, 'Kategorie', CAT_KEYS, ''), sub: h.s(x.sub, 'Unterkategorie', {max:60}), maker: h.s(x.maker, 'Hersteller', {max:60}), artNo: h.s(x.artNo, 'Artikelnummer', {max:60}),
+      spec: h.s(x.spec, 'Spezifikation', {max:200}), pack: h.s(x.pack, 'Gebindegröße', {max:40}), ean: /^\d{8}$|^\d{12,14}$/.test(str(x.ean)) ? str(x.ean) : '', photo: ph};
+  }
   return null;
 }
 /* Einheitliche Form jedes gespeicherten Eintrags (alle Felder, Standardwerte). Damit ist ein
@@ -910,6 +924,7 @@ export function fileRefs(next){
   });
   Object.values(next.log || {}).forEach(l => { add(l.photoId, 'Foto im Logbuch vom ' + fmtDate(l.date)); add(l.thumbId, 'Vorschaubild im Logbuch vom ' + fmtDate(l.date)); });
   Object.values(next.defects || {}).forEach(d => (d.photos || []).forEach((p, i) => { add(p.id, 'Foto ' + (i + 1) + ' zum Mangel „' + d.title + '“'); add(p.thumbId, 'Vorschaubild ' + (i + 1) + ' zum Mangel „' + d.title + '“'); }));
+  Object.values(next.parts || {}).forEach(p => { if (p && p.photo) { add(p.photo.id, 'Bild zum Artikel „' + p.name + '“'); add(p.photo.thumbId, 'Vorschaubild zum Artikel „' + p.name + '“'); } });
   return refs;
 }
 
@@ -967,6 +982,8 @@ export function validateZipJson(d){
   if (d.version < 6 && logs.some(l => l && typeof l === 'object' && (l.kind === 'meter' || l.fix != null))) throw new Error('Die Sicherung ist beschädigt (Zählerwechsel oder Berichtigungen in einer Sicherung vor Version 6).');
   if (d.version < 8 && (logs.some(hasV8Log) || (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV8Bike))) throw new Error('Die Sicherung ist beschädigt (Tätigkeiten, Checkliste oder Favoriten in einer Sicherung vor Version 8).');
   if (d.version < 9 && d.navigation != null) throw new Error('Menübelegung in einer Sicherung vor Version 9.');
+  const teile = [].concat(Array.isArray(d.teile) ? d.teile : [], d.verwaist && Array.isArray(d.verwaist.teile) ? d.verwaist.teile : []);
+  if (d.version < 10 && teile.some(hasV10Part)) throw new Error('Die Sicherung ist beschädigt (Artikelangaben oder Artikelbilder in einer Sicherung vor Version 10).');
   const navigation = navigationOf(d.navigation);
   const map = {}; COLLS.forEach(k => { map[k] = d[KEYS[k]]; });
   const next = strictCollections(map);

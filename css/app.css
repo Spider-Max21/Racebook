@@ -506,9 +506,10 @@ body:not([data-page="error"]) .toast{bottom:calc(78px + env(safe-area-inset-bott
 .menu-link .ic{flex:none;width:20px;height:20px}
 .check-filter{display:flex;gap:8px;align-items:center;font-size:14px;margin-top:12px}
 .check-filter input{width:20px;height:20px;accent-color:var(--accent)}
-#partsBody .part{flex-wrap:wrap;gap:10px}
-#partsBody .part>div:first-child{flex:1;min-width:140px}
-#partsBody .qty{flex-wrap:wrap;justify-content:flex-end;gap:6px}
+/* Ab 1.4.0 wirklich als umbrechende Zeile: reicht der Platz nicht, stehen die Knöpfe unter dem Namen (vorher lagen sie bei 390 px über dem Text) */
+#partsBody .part{display:flex;flex-wrap:wrap;gap:10px}
+#partsBody .part>div:first-child{flex:1 1 200px;min-width:0}
+#partsBody .qty{flex-wrap:wrap;justify-content:flex-end;gap:6px;margin-left:auto}
 .nav-fixed{display:flex;align-items:center;gap:10px;padding:12px;border:1px dashed var(--line);border-radius:8px}
 .nav-fixed .hint{margin-left:auto}
 .nav-choice{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}
@@ -518,3 +519,31 @@ body:not([data-page="error"]) .toast{bottom:calc(78px + env(safe-area-inset-bott
 .nav-grip{padding:8px;touch-action:none;cursor:grab}
 @media(min-width:800px){.more-sheet{margin:auto;border-radius:16px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+
+/* Lager: Artikel aus einem Foto, Artikelangaben und Artikelbild (ab 1.4.0) */
+.capture-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
+.capture-row .btn{flex:1 1 150px;min-width:0}
+.capture-row .hint{flex:1 1 100%;margin:2px 0 0}
+.mark{display:inline-block;font-size:12px;font-weight:600;padding:0 7px;border-radius:999px;margin-left:6px;line-height:18px;white-space:nowrap}
+.mark:empty{display:none}
+.mark.mark-ok{color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 55%,var(--line))}
+.mark.mark-check{color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 65%,var(--line))}
+.mark.mark-none{color:var(--muted);border:1px dashed var(--line)}
+.f.is-check input,.f.is-check select{border-color:var(--warn);box-shadow:0 0 0 1px var(--warn)}
+.cap-box{display:grid;gap:8px;min-width:0}
+.cap-img{display:block;max-width:100%;max-height:260px;border-radius:var(--r-s);border:1px solid var(--line);object-fit:contain;background:var(--surface-2)}
+.cap-read>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600}
+.cap-text{font-size:13px;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
+.part-more>summary{cursor:pointer;min-height:44px;display:flex;flex-wrap:wrap;gap:2px 8px;align-items:center;font-weight:600}
+.part-more>summary .hint{font-weight:400;font-size:13px}
+.part-more[open]>summary{margin-bottom:8px}
+.part-main{display:flex;gap:10px;align-items:center;min-width:0}
+.part-main>div{min-width:0}
+.part-pic{flex:none;padding:0}
+.part-thumb{width:48px;height:48px;border-radius:6px;object-fit:cover;display:block}
+.match-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line);margin-top:8px}
+.match-row>span{min-width:0;overflow-wrap:anywhere;flex:1 1 180px}
+.part-more>summary{list-style:none}
+.part-more>summary::-webkit-details-marker{display:none}
+.part-more>summary::after{content:"+";margin-left:auto;font:700 24px/1 var(--f-cond);color:var(--accent-text)}
+.part-more[open]>summary::after{content:"–"}

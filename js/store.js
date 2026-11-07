@@ -200,8 +200,9 @@ async function adjustR(id, op, spec, ep){
   const check = async () => { const n = await askApplied(op, id); return n.state !== 'known' ? 'unclear' : n.applied ? 'ok' : 'fail'; };
   const f = failOf('update', path);
   if (f && !f.after) { S.lastErr = {code: 'unavailable'}; return check(); }
-  const ops = [{store: coll, type: 'adjust', id, op, add: Math.round(Number(spec.add) || 0), low: !!spec.low, set: spec.set && Object.keys(spec.set).length ? clone(spec.set) : null,
-    guard: spec.guard && Object.keys(spec.guard).length ? clone(spec.guard) : null}];
+  /* Ab 1.4.0 mit Dateien (neues Artikelbild) in derselben Transaktion */
+  const ops = (Array.isArray(spec.files) ? spec.files : []).map(x => ({store: 'files', type: 'put', value: x})).concat([{store: coll, type: 'adjust', id, op, add: Math.round(Number(spec.add) || 0), low: !!spec.low, set: spec.set && Object.keys(spec.set).length ? clone(spec.set) : null,
+    guard: spec.guard && Object.keys(spec.guard).length ? clone(spec.guard) : null}]);
   const r = await run(ops, (late, res) => {
     applied.add(op);
     ((res && res.adjusted) || []).forEach(x => { if (x.doc) L[coll][x.id] = strip(x.doc); mirror(coll, x.id); });

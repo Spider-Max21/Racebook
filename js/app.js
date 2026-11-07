@@ -132,12 +132,12 @@ function orphanCount(){
    Alles, was zum vorherigen Bestand gehört, wird hier geschlossen: Formulare, Entwürfe, Schnell-Eintrag,
    Bearbeiten-Ansichten, offene Vorgänge. Laufende Schreibvorgänge des alten Bestands weist der Speicher ab.
    Auch bei gleichen Motorrad-IDs bleibt nichts Altes zum erneuten Speichern stehen. */
-function openDraftCount(){
+function openDraftCount(skipSetup){
   let n = 0;
   const open = id => { const d = document.getElementById(id); return !!(d && d.open); };
   if (!$('#hoursForm').hidden) n++;
   if (S.doneOpen) n++;
-  if (open('logDetails') || open('rideDetails') || open('setupDetails') || open('defectDetails')) n++;
+  if (open('logDetails') || open('rideDetails') || (!skipSetup && open('setupDetails')) || open('defectDetails')) n++;
   if (S.defEdit || S.defDone || S.pending || S.adding || S.addPhoto || counter.fixOpen()) n++;
   if (Object.values(S.editing || {}).some(Boolean)) n++;
   if ($('#pName') && $('#pName').value) n++;
@@ -146,7 +146,9 @@ function openDraftCount(){
 let resetInfo = null;
 function onDatasetChange(phase){
   if (phase === 'vorher') {
-    resetInfo = {drafts: openDraftCount(), local: !!S.replacing};
+    /* Ab 1.4.0: ein geänderter Setup-Entwurf bleibt erhalten und wird danach als neues Setup angeboten (A1) */
+    const setupKeep = bike.keepSetupDraft();
+    resetInfo = {drafts: openDraftCount(!!setupKeep), local: !!S.replacing, setupKeep};
     S.ops = {};
     counter.closeFix(); counter.closeSeg();
     if (S.pending) S.pending = null;
@@ -165,6 +167,7 @@ function onDatasetChange(phase){
   const info = resetInfo || {drafts: 0, unres: 0, local: false}; resetInfo = null;
   if (!S.bikes[S.bike]) { const b = bikeList()[0]; S.bike = b ? b.id : ''; lsSet('bike', S.bike); }
   bike.resetBikeForms();
+  if (info.setupKeep && !bike.restoreSetupDraft(info.setupKeep)) info.drafts++;
   S.lastReset = {drafts: info.drafts, unres: info.unres};
   if (!info.local) S.replaced = {drafts: info.drafts, unres: info.unres, how: ''};
   if (R.route.page === 'add') navigate({page: 'home'}, {replace: true});
