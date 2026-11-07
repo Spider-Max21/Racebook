@@ -12,6 +12,7 @@ import {opFor, parkOp, execOp, bumpGen, lowCheck, addUnres, BIKE_FORMS, cleanupF
 import {$, $$, toast, errText, arm, VErr, fieldNum, fieldDate, imgTag, hydrate, fileUrl, icon, fmtSize} from '../ui.js';
 import {makePhoto, makeBikePhoto, makePdf, makeArticlePhoto} from '../images.js';
 import * as stock from './stock.js';
+import * as beleg from './beleg.js';
 import * as ocr from '../ocr.js';
 import {parseLabel} from '../label.js';
 import {openCropper} from '../cropper.js';
@@ -279,6 +280,8 @@ export function closeDraft(k){
   else if (k === 'hoursForm') { const hf = $('#hoursForm'); hf.hidden = true; hoursReset(); }
   else if (k === 'meterForm') { const mf = $('#meterForm'); if (mf) { mf.reset(); $('#mDate').value = todayISO(); meterPlaceholder(curBike()); } }
   else if (k === 'setupForm') { resetSetupForm(); $('#setupDetails').open = false; }
+  /* Ab 1.6.0: Beleg übernommen (auch wenn ein unklarer Versuch nachträglich als gespeichert erkannt wird) */
+  else if (k === 'rcptForm') beleg.close();
   else if (k === 'partForm') { stock.dropCap(); stock.dropImg(); S.fill = null; $('#pName').value = ''; $('#pQty').value = '1'; $('#pMin').value = '1'; stock.fillExtra(null); stock.fillPrice(null); stock.clearMarks(); partEditMode(null); renderPartBike(); stock.renderBikePick([]); }
   else if (k === 'addBikeForm') { S.adding = false; dropAddPhoto(); const el = $('#addBike'); if (el) el.innerHTML = ''; }
   else if (k === 'defectForm' || k === 'defDoneForm') { R.closeDefectDraft(k); }
@@ -1127,6 +1130,7 @@ export function renderInventory(){
   hydrate($('#partsBody'));
   renderPartBike(); stock.fillCats();
   if (S.cap) stock.renderMatch(S.parts);
+  beleg.refresh();
 }
 
 function renderGarage(){
@@ -1807,6 +1811,8 @@ async function storeBikePhoto(file, forAdd, bid, epoch, res){
 
 /* ---------- Ereignisse ---------- */
 export async function onClick(t){
+  /* Ab 1.6.0: Beleg übernehmen */
+  if (await beleg.onClick(t)) return true;
   /* Anderen Artikel bearbeiten = neuer Vorgang: geänderte Eingaben erst klären (ab 1.3.1). Derselbe, schon offene Artikel:
      den Entwurf behalten und nur hinspringen. */
   if (t.dataset.partedit && $('#partForm').dataset.part === t.dataset.partedit && $('#partForm').closest('details').open) { $('#pName').focus(); $('#partForm').scrollIntoView({block: 'nearest'}); return true; }
@@ -1979,6 +1985,7 @@ export async function onClick(t){
 }
 
 export function onInput(t){
+  if (beleg.onInput(t)) return true;    /* ab 1.6.0: Beleg übernehmen */
   if (S.cap && t.closest && t.closest('#partForm')) stock.onInput(t);
   if (t.id === 'abModel') {
     const tp = MODEL_TPL[$('#abBrand').value + '|' + t.value.trim().toLowerCase()];
@@ -1998,6 +2005,7 @@ export function onInput(t){
 }
 
 export function onChange(t){
+  if (beleg.onChange(t)) return true;   /* ab 1.6.0: Beleg übernehmen */
   /* Artikel aus einem Foto: offene Eingaben im Teileformular erst klären (Rückfrage), dann das Bild übernehmen */
   if (t.id === 'capCam' || t.id === 'capPick') { const file = t.files && t.files[0]; t.value = ''; if (file) drafts.begin(() => startCapture(file)); return true; }
   if (t.id === 'pImgFile') { const file = t.files && t.files[0]; t.value = ''; if (file) { stock.setImg(file); $('#pMore').open = true; partModeUi(); drafts.touch('part'); } return true; }
@@ -2044,6 +2052,7 @@ export function onChange(t){
 
 export async function onSubmit(f, busy){
   if (f.id === 'quickForm') return false;
+  if (f.id === 'rcptForm') return beleg.submit(busy);   /* ab 1.6.0: Beleg übernehmen */
   if (f.id === 'addBikeForm') { busy(true); await addBike(); return true; }
   if (f.id === 'manLinkForm') {
     /* Für das Motorrad, zu dem das Formular gehört (nicht ein inzwischen gewähltes anderes) */
@@ -2322,6 +2331,7 @@ function registerDrafts(){
   drafts.register({key: 'ride', label: 'Fahrt', root: () => $('#rideForm'), isOpen: () => $('#rideDetails').open, save: submitOf('rideForm'), discard: () => { parkOp('rideForm'); closeDraft('rideForm'); }, reveal: show('rides', 'rideDetails', 'rideDetails')});
   drafts.register({key: 'setup', label: 'Fahrwerk-Setup', root: () => $('#setupForm'), extra: () => S.editSetup || '', isOpen: () => $('#setupDetails').open, save: submitOf('setupForm'), discard: () => { parkOp('setupForm'); closeDraft('setupForm'); }, reveal: show('setup', 'setupDetails', 'setupDetails')});
   const partDet = () => { const f = $('#partForm'); return f ? f.closest('details') : null; };
+  beleg.register(show('inventory', 'rcptForm'));   /* ab 1.6.0: Beleg übernehmen */
   drafts.register({key: 'part', label: 'Teil', root: () => $('#partForm'), extra: () => ($('#partForm').dataset.part || '') + stock.sig(), save: submitOf('partForm'), discard: () => { parkOp('partForm'); closeDraft('partForm'); },
     isOpen: () => !!$('#partForm').dataset.part || !!S.cap || !!(partDet() && partDet().open), close: () => { parkOp('partForm'); closeDraft('partForm'); const d = partDet(); if (d) d.open = false; }, reveal: show('inventory', 'g-parts')});
   drafts.register({key: 'meter', label: 'Zählerwechsel', root: () => $('#meterForm'), save: submitOf('meterForm'), discard: () => { parkOp('meterForm'); closeDraft('meterForm'); },

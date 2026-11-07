@@ -143,6 +143,7 @@ export function payloadFiles(p){
   if (p.photo && typeof p.photo === 'object') ids.push(p.photo.id, p.photo.thumbId);
   if (p.manual && typeof p.manual === 'object') ids.push(p.manual.fileId);
   if (Array.isArray(p.photos)) p.photos.forEach(x => { if (x) ids.push(x.id, x.thumbId); });
+  if (p.doc && typeof p.doc === 'object') ids.push(p.doc.id, p.doc.thumbId);   /* ab 1.6.0: Belegbild einer Übernahme */
   return ids.filter(validId);
 }
 /* Alles, was offene, ungeklärte oder vorbereitete Vorgänge noch brauchen könnten */

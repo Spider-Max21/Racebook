@@ -556,3 +556,16 @@ body:not([data-page="error"]) .toast{bottom:calc(78px + env(safe-area-inset-bott
 .bike-pick-list input{width:22px;height:22px;accent-color:var(--accent);flex:none}
 .buy-list{display:grid;gap:4px;font-size:14px}
 .buy-list .buy{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 10px;border-top:1px solid var(--line);padding-top:4px}
+
+/* Lager: Beleg übernehmen (ab 1.6.0) */
+.rcpt{margin-top:10px;display:grid;gap:10px;min-width:0}
+.rcpt h3{margin:0}
+.rc-head{display:flex;gap:12px;align-items:flex-start;min-width:0}
+.rc-head>div{min-width:0;flex:1}
+.rc-img{width:96px;max-height:140px;object-fit:cover;border-radius:var(--r-s);border:1px solid var(--line);flex:none}
+.rc-row{border:1px solid var(--line);border-radius:var(--r-s);padding:10px 12px;display:grid;gap:8px;min-width:0}
+.rc-row.off{opacity:.62}
+.rc-sel{display:flex;align-items:center;gap:10px;min-height:44px;margin:0;font-weight:600;color:var(--ink)}
+.rc-sel input{width:22px;height:22px;accent-color:var(--accent);flex:none}
+.rc-src,.rc-skip{overflow-wrap:anywhere}
+.buy .doc-btn{min-height:32px}

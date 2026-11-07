@@ -76,7 +76,7 @@ export async function makePhoto(file){
 }
 
 /* Artikelbild im Lager (ab 1.4.0): ganzes Bild, kleiner als Fotos im Logbuch, plus Vorschaubild */
-export const ARTICLE_MAX = 1200, ARTICLE_THUMB = 240;
+export const ARTICLE_MAX = 1200, ARTICLE_THUMB = 240, RECEIPT_MAX = 2000;
 export async function makeArticlePhoto(file){
   const dec = await decodeImage(file);
   try {
@@ -86,6 +86,19 @@ export async function makeArticlePhoto(file){
     const a = await fileRec(main.blob, {w: main.w, h: main.h, name, role: 'article'});
     const b = await fileRec(th.blob, {w: th.w, h: th.h, name: 'vorschau-' + name, role: 'thumb'});
     return {photo: {id: a.id, thumbId: b.id}, files: [a, b]};
+  } finally { dec.close(); }
+}
+
+/* Ab 1.6.0: Belegbild – lesbar verkleinert (höchstens 2000 px), JPEG ohne Kameradaten, dazu eine Vorschau */
+export async function makeReceiptImage(file){
+  const dec = await decodeImage(file);
+  try {
+    const main = await render(dec, null, RECEIPT_MAX, RECEIPT_MAX, 0.85);
+    const th = await render(dec, null, ARTICLE_THUMB, ARTICLE_THUMB, 0.75);
+    const name = String(file.name || 'beleg').slice(0, 120);
+    const a = await fileRec(main.blob, {w: main.w, h: main.h, name, role: 'receipt'});
+    const b = await fileRec(th.blob, {w: th.w, h: th.h, name: 'vorschau-' + name, role: 'thumb'});
+    return {doc: {id: a.id, thumbId: b.id}, files: [a, b]};
   } finally { dec.close(); }
 }
 

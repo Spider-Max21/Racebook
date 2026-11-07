@@ -219,6 +219,45 @@ async function adjustR(id, op, spec, ep){
   emit(coll);
   return 'ok';
 }
+/* Ab 1.6.0: Beleg übernehmen – Belegbild, neue Artikel (create) und Zugänge zu vorhandenen Artikeln (adjust) in einer
+   Transaktion: alles oder nichts. op: Vorgangskennung des Belegs; jeder Teilschritt steht mit eigener Kennung im Vorgangsbuch
+   (der erste mit op selbst, die weiteren mit op-1, op-2 …), eine Wiederholung nach unklarem Ergebnis wendet nichts doppelt an.
+   Abgleich ungeklärter Versuche wie bei einer Bestandsänderung über op.
+   spec: {files: [Datei], creates: [Artikel mit id], adjusts: [{id, add, set, guard, buy}]} */
+export function sImportR(op, spec, opts){
+  const ep = epochArg(opts);
+  return counted(() => importR(op, spec || {}, ep));
+}
+async function importR(op, spec, ep){
+  if (!ready()) { S.lastErr = notReady(); return 'fail'; }
+  const coll = 'parts', t = T(), creates = spec.creates || [], adjusts = spec.adjusts || [];
+  const sub = k => k === 0 ? op : op + '-' + k, subs = creates.concat(adjusts).map((x, k) => sub(k));
+  if (!subs.length) { S.lastErr = {code: 'invalid'}; return 'fail'; }
+  if (t && t.latency) await wait(t.latency);
+  const check = async () => { const n = await askApplied(subs[0], ''); return n.state !== 'known' ? 'unclear' : n.applied ? 'ok' : 'fail'; };
+  const f = failOf('update', coll + '/beleg');
+  if (f && !f.after) { S.lastErr = {code: 'unavailable'}; return check(); }
+  const ops = (Array.isArray(spec.files) ? spec.files : []).map(x => ({store: 'files', type: 'put', value: x}))
+    .concat(creates.map((d, i) => ({store: coll, type: 'create', op: sub(i),
+      value: Object.assign(clone(d), {buys: (d.buys || []).map(b => Object.assign(clone(b), {op: b.op || sub(i)}))})})))
+    .concat(adjusts.map((a, i) => ({store: coll, type: 'adjust', id: a.id, op: sub(creates.length + i), add: Math.round(Number(a.add) || 0), low: false,
+      set: a.set && Object.keys(a.set).length ? clone(a.set) : null, guard: a.guard && Object.keys(a.guard).length ? clone(a.guard) : null, buy: a.buy ? clone(a.buy) : null})));
+  const r = await run(ops, (late, res) => {
+    subs.forEach(s => applied.add(s));
+    ((res && res.adjusted) || []).forEach(x => { if (x.doc) L[coll][x.id] = strip(x.doc); mirror(coll, x.id); });
+    if (late) emit(coll);
+  }, {epoch: ep});
+  if (r.err) { S.lastErr = r.err; return isFinal(r.err) ? 'fail' : check(); }
+  if (r.timeout) { S.lastErr = {code: 'timeout'}; return 'unclear'; }
+  if (t && t.writes) t.writes.push('beleg ' + op);
+  if (f && f.after) {
+    if (f.late) emit(coll, f.lateMs || 80); else { emit(coll); await wait(20); }
+    S.lastErr = {code: 'unavailable'};
+    return check();
+  }
+  emit(coll);
+  return 'ok';
+}
 /* Ist eine Bestandsänderung im Speicher angewendet? {state: 'known', applied} oder {state: 'unclear'} */
 export async function askApplied(op, id){
   if (failOf('get', 'parts/' + id)) return {state: 'unclear'};

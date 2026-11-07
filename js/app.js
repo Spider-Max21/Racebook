@@ -141,6 +141,7 @@ function openDraftCount(skipSetup){
   if (S.defEdit || S.defDone || S.pending || S.adding || S.addPhoto || counter.fixOpen()) n++;
   if (Object.values(S.editing || {}).some(Boolean)) n++;
   if ($('#pName') && $('#pName').value) n++;
+  if (S.rcpt) n++;
   return n;
 }
 let resetInfo = null;
@@ -157,6 +158,7 @@ function onDatasetChange(phase){
     /* Alle Generationen erhöhen: späte Abschlüsse alter Vorgänge schließen keine neuen Entwürfe */
     Object.keys(S.gen).forEach(k => bumpGen(k));
     bike.closeDraft('partForm');
+    bike.closeDraft('rcptForm');   /* ab 1.6.0: offener Beleg (samt laufender Erkennung) gehört zum alten Bestand */
     if (S.adding || S.addPhoto) bike.closeDraft('addBikeForm');
     S.shareReady = null; S.oemDraft = null; S.editing = {};
     nav.resetEditor();

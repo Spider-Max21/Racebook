@@ -1,13 +1,13 @@
 /* Racebook – Service Worker: hält die App für den Offline-Betrieb bereit.
    Die Daten liegen in IndexedDB und werden hier nie angefasst. Eine neue App-Version wird zuerst
    vollständig geladen und erst aktiv, wenn die Seite es anfordert („Jetzt aktualisieren“). */
-const VERSION = 'racebook-1.5.0';
+const VERSION = 'racebook-1.6.0';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/util.js', 'js/state.js', 'js/domain.js', 'js/db.js', 'js/store.js', 'js/ops.js', 'js/ui.js',
   'js/navigation.js', 'js/preferences.js', 'js/images.js', 'js/cropper.js', 'js/zip.js', 'js/backup.js', 'js/registry.js', 'js/work.js', 'js/drafts.js',
   'js/views/home.js', 'js/views/bike.js', 'js/views/defects.js', 'js/views/data.js', 'js/views/counter.js',
-  'js/label.js', 'js/ocr.js', 'js/views/stock.js',
+  'js/label.js', 'js/ocr.js', 'js/views/stock.js', 'js/receipt.js', 'js/views/beleg.js',
   'icons/emblem-light.svg', 'icons/emblem-dark.svg', 'icons/favicon.svg', 'icons/icon.svg', 'icons/icon-maskable.svg',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png'
 ];

@@ -307,6 +307,12 @@
           <label class="btn" for="capPick"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4z"/><path d="M4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="8.5" r="1.5"/></svg>Bild auswählen</label><input type="file" id="capPick" accept="image/*" class="sr-file" data-nodirty>
           <p class="hint">Artikel aus einem Foto oder Bildschirmfoto erfassen: Racebook liest den Text auf dem Etikett direkt auf diesem Gerät und schlägt die Angaben vor. Du prüfst alles und bestätigst Anzahl und Motorrad selbst.</p>
         </div>
+        <div class="capture-row" id="rcptRow">
+          <label class="btn" for="rcptCam"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3h12v18l-2-1.5L14 21l-2-1.5L10 21l-2-1.5L6 21z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>Beleg fotografieren</label><input type="file" id="rcptCam" accept="image/*" capture="environment" class="sr-file" data-nodirty>
+          <label class="btn" for="rcptPick"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4z"/><path d="M4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="8.5" r="1.5"/></svg>Beleg auswählen</label><input type="file" id="rcptPick" accept="image/*" class="sr-file" data-nodirty>
+          <p class="hint">Rechnung oder Ausschnitt einer Rechnung: Racebook liest die Positionen auf diesem Gerät und schlägt sie vor. Du wählst aus, prüfst und bestätigst; erst dann ändert sich das Lager.</p>
+        </div>
+        <form id="rcptForm" class="card rcpt" hidden novalidate></form>
         <details class="form-card" style="margin-top:10px">
           <summary><h3 id="partFormTitle">Teil hinzufügen</h3></summary>
           <form id="partForm" class="grid">

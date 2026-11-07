@@ -207,7 +207,9 @@ export function renderBuys(p, fill){
   if (!p) { box.hidden = true; box.innerHTML = ''; return; }
   /* Ab 1.5.0 (Prüfung PR 6): jeder Einkauf mit seinem eigenen, damals bestätigten Bezug – nicht mit der heutigen Einheit */
   const sum = buySum(p), buys = (p.buys || []).slice().reverse();
-  const rows = buys.slice(0, 20).map(b => '<div class="buy"><span>' + esc(fmtDate(b.date)) + ' · ' + fmt(b.qty, 0) + ' ' + esc(buyUnit(b)) + (b.price == null ? ' · Preis nicht erfasst' : ' à ' + esc(fmtPrice(b.price))) + '</span>'
+  /* Ab 1.6.0: Einkauf aus einem Beleg – Händler und Belegbild (zum Vergrößern) */
+  const rows = buys.slice(0, 20).map(b => '<div class="buy"><span>' + esc(fmtDate(b.date)) + ' · ' + fmt(b.qty, 0) + ' ' + esc(buyUnit(b)) + (b.price == null ? ' · Preis nicht erfasst' : ' à ' + esc(fmtPrice(b.price))) + (b.vendor ? ' · ' + esc(b.vendor) : '') + '</span>'
+    + (b.doc ? '<button class="mini doc-btn" type="button" data-photo="' + esc(b.doc.id) + '" aria-label="Beleg vom ' + esc(fmtDate(b.date)) + ' anzeigen">Beleg</button>' : '')
     + (b.price == null ? '' : '<b>' + esc(fmtPrice(b.price * b.qty)) + '</b>') + '</div>').join('');
   const per = sum.groups.map(g => fmt(g.qty, 0) + ' ' + buyUnit(g)).join(' und ');
   box.hidden = false;

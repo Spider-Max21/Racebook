@@ -11,7 +11,7 @@ import {decodeImage} from './images.js';
 export const OCR_BASE = new URL('../vendor/tesseract/', import.meta.url).href;
 /* Dateien der Erkennung; geladen wird je Gerät nur eine der beiden Kernvarianten (mit oder ohne SIMD) */
 export const OCR_FILES = ['tesseract.min.js', 'worker.min.js', 'tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm', 'tesseract-core-lstm.js', 'tesseract-core-lstm.wasm', 'deu.traineddata.gz'];
-const OCR_MAX = 1600;
+const OCR_MAX = 1600, RECEIPT_MAX = 2200;
 const T = () => window.__T || null;
 
 let scriptP = null, current = null;
@@ -30,10 +30,10 @@ function simd(){ const t = T(); if (t && t.noSimd) return false; try { return We
 
 /* Bild für die Erkennung: Ausrichtung übernehmen, auf höchstens 1600 px verkleinern; dazu eine Graustufen-Fassung
    mit vertauschten Hell/Dunkel-Werten (helle Schrift auf dunklem Grund) */
-async function canvases(blob){
+async function canvases(blob, max){
   const dec = await decodeImage(blob);
   try {
-    const sc = Math.min(1, OCR_MAX / Math.max(dec.w, dec.h)), w = Math.max(1, Math.round(dec.w * sc)), h = Math.max(1, Math.round(dec.h * sc));
+    const sc = Math.min(1, (max || OCR_MAX) / Math.max(dec.w, dec.h)), w = Math.max(1, Math.round(dec.w * sc)), h = Math.max(1, Math.round(dec.h * sc));
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(dec.src, 0, 0, w, h);
     const g = document.createElement('canvas'); g.width = w; g.height = h;
@@ -62,7 +62,10 @@ function merge(base, more){
 export function cancel(){ const w = current; current = null; if (w) { w.cancelled = true; try { w.worker && w.worker.terminate(); } catch (e) {} } }
 
 /* Erkennen: {lines: [{t, c, h}], codes: [{format, value}], ms}. Fehler: {code: 'unavailable'|'cancelled'|'decode'|'too_big'} */
-export async function recognize(blob, onProgress){
+/* opts (ab 1.6.0): {receipt: true} für Belege – Text als ein Block lesen (Zeilen einer Tabelle bleiben zusammen), etwas
+   höhere Auflösung, ohne Durchgang mit vertauschten Hell/Dunkel-Werten und ohne verstreuten Text */
+export async function recognize(blob, onProgress, opts){
+  const rcpt = !!(opts && opts.receipt);
   cancel();
   const run = current = {worker: null, cancelled: false};
   const step = (status, p) => { if (!run.cancelled && onProgress) { try { onProgress(status, p); } catch (e) {} } };
@@ -71,7 +74,7 @@ export async function recognize(blob, onProgress){
   const t = T();
   if (t && t.ocrDelay) await new Promise(r => setTimeout(r, t.ocrDelay));
   step('Bild wird vorbereitet', 0);
-  const cv = await canvases(blob); stop();
+  const cv = await canvases(blob, rcpt ? RECEIPT_MAX : 0); stop();
   /* Strichcodes nur mit der Erkennung des Browsers (auf dem Gerät); fehlt sie, wird ohne erkannt */
   let codes = [];
   if (typeof window.BarcodeDetector === 'function') {
@@ -91,12 +94,12 @@ export async function recognize(blob, onProgress){
   } catch (e) { if (run.cancelled) throw {code: 'cancelled'}; throw {code: 'unavailable'}; }
   try {
     stop();
-    await run.worker.setParameters({tessedit_pageseg_mode: '3'});
+    await run.worker.setParameters({tessedit_pageseg_mode: rcpt ? '6' : '3', preserve_interword_spaces: rcpt ? '1' : '0'});
     const opt = {text: true, blocks: true};
     const lines = linesOf(await run.worker.recognize(cv.c, {}, opt)); stop();
-    merge(lines, linesOf(await run.worker.recognize(cv.inv, {}, opt))); stop();
+    if (!rcpt) { merge(lines, linesOf(await run.worker.recognize(cv.inv, {}, opt))); stop(); }
     /* Kaum Text gefunden: noch einmal als verstreuten Text lesen (kleine Etiketten neben Gegenständen) */
-    if (lines.filter(l => l.c >= 60 && /[A-Za-zÄÖÜäöü]{3}/.test(l.t)).length < 2) {
+    if (!rcpt && lines.filter(l => l.c >= 60 && /[A-Za-zÄÖÜäöü]{3}/.test(l.t)).length < 2) {
       await run.worker.setParameters({tessedit_pageseg_mode: '11'});
       merge(lines, linesOf(await run.worker.recognize(cv.c, {}, opt))); stop();
     }

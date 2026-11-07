@@ -53,8 +53,11 @@ export const ZIP_FORMAT = 'racebook-backup';
    spec, pack, ean, photo). 1.3.x kennt sie nicht und würde sie beim Einlesen still verwerfen; deshalb lehnt es Version 10 ab.
    Ab 1.5.0 Version 11, wenn ein Lagerartikel mehreren ausgewählten Motorrädern zugeordnet ist (bike 'some', bikes),
    eine Bestandseinheit, einen Einkaufspreis oder Einkäufe hat (unit, price, buys). 1.4.x lehnt Version 11 ab.
-   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9 bzw. 10. */
-export const ZIP_VERSION = 11;
+   Ab 1.6.0 Version 12, wenn ein Einkauf aus einem Rechnungsfoto stammt (Beleg doc, Prüfsumme docHash, Händler vendor).
+   1.5.x würde Beleg und Händler beim Einlesen still verwerfen; deshalb lehnt es Version 12 ab.
+   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10 bzw. 11. */
+export const ZIP_VERSION = 12;
+export const ZIP_VERSION_V11 = 11;
 export const ZIP_VERSION_V10 = 10;
 export const ZIP_VERSION_NAV = 9;
 export const ZIP_VERSION_V8 = 8;
@@ -81,6 +84,10 @@ export const needsV10 = next => Object.values((next && next.parts) || {}).some(h
 /* Version 11: Mehrfachzuordnung, Einheit, Einkaufspreis, Einkäufe (ab 1.5.0) */
 export const hasV11Part = p => !!p && typeof p === 'object' && (p.bike === 'some' || (Array.isArray(p.bikes) && p.bikes.length > 0) || (p.unit != null && p.unit !== '') || p.price != null || (Array.isArray(p.buys) && p.buys.length > 0));
 export const needsV11 = next => Object.values((next && next.parts) || {}).some(hasV11Part);
+/* Version 12: Einkäufe aus einem Rechnungsfoto (ab 1.6.0) */
+export const hasV12Buy = b => !!b && typeof b === 'object' && (b.doc != null || (b.docHash != null && b.docHash !== '') || (b.vendor != null && b.vendor !== ''));
+export const hasV12Part = p => !!p && typeof p === 'object' && Array.isArray(p.buys) && p.buys.some(hasV12Buy);
+export const needsV12 = next => Object.values((next && next.parts) || {}).some(hasV12Part);
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
 const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && d.bike !== 'some' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
@@ -344,7 +351,11 @@ function cleanBuy(b, h, i){
   const date = h.d(b.date, 'Einkauf ' + (i + 1) + ' (Datum)', {req:true}), qty = h.n(b.qty, 'Einkauf ' + (i + 1) + ' (Menge)', {int:true, min:1, max:99999});
   if (!date || qty == null) return null;
   return {date, qty, price: h.n(b.price, 'Einkauf ' + (i + 1) + ' (Preis)', {int:true, min:0, max:MAX_PRICE}), op: validId(b.op) ? b.op : '',
-    unit: h.one(b.unit, 'Einkauf ' + (i + 1) + ' (Einheit)', PART_UNITS, ''), pack: h.s(b.pack, 'Einkauf ' + (i + 1) + ' (Gebindegröße)', {max:40})};
+    unit: h.one(b.unit, 'Einkauf ' + (i + 1) + ' (Einheit)', PART_UNITS, ''), pack: h.s(b.pack, 'Einkauf ' + (i + 1) + ' (Gebindegröße)', {max:40}),
+    /* Ab 1.6.0: aus einem Rechnungsfoto – Händler, Belegbild (geteilt von allen Einkäufen desselben Belegs), Prüfsumme des Bildes */
+    vendor: h.s(b.vendor, 'Einkauf ' + (i + 1) + ' (Händler)', {max:80}),
+    doc: b.doc && typeof b.doc === 'object' && validId(b.doc.id) ? {id: b.doc.id, thumbId: validId(b.doc.thumbId) ? b.doc.thumbId : ''} : (b.doc != null ? (h.fail('Einkauf ' + (i + 1) + ' (Beleg)', 'ist ungültig.'), null) : null),
+    docHash: b.docHash == null || b.docHash === '' ? '' : (/^[0-9a-f]{64}$/.test(b.docHash) ? b.docHash : (h.fail('Einkauf ' + (i + 1) + ' (Prüfsumme)', 'ist ungültig.'), ''))};
 }
 /* Gehört ein Lagerartikel (auch) zu diesem Motorrad? 'both' gilt für alle */
 export const partFor = (p, bid) => !!p && (p.bike === 'both' || p.bike === bid || (p.bike === 'some' && Array.isArray(p.bikes) && p.bikes.includes(bid)));
@@ -984,6 +995,8 @@ export function fileRefs(next){
   Object.values(next.log || {}).forEach(l => { add(l.photoId, 'Foto im Logbuch vom ' + fmtDate(l.date)); add(l.thumbId, 'Vorschaubild im Logbuch vom ' + fmtDate(l.date)); });
   Object.values(next.defects || {}).forEach(d => (d.photos || []).forEach((p, i) => { add(p.id, 'Foto ' + (i + 1) + ' zum Mangel „' + d.title + '“'); add(p.thumbId, 'Vorschaubild ' + (i + 1) + ' zum Mangel „' + d.title + '“'); }));
   Object.values(next.parts || {}).forEach(p => { if (p && p.photo) { add(p.photo.id, 'Bild zum Artikel „' + p.name + '“'); add(p.photo.thumbId, 'Vorschaubild zum Artikel „' + p.name + '“'); } });
+  /* Ab 1.6.0: Belegbilder der Einkäufe (ein Bild kann zu mehreren Einkäufen gehören) */
+  Object.values(next.parts || {}).forEach(p => ((p && p.buys) || []).forEach(b => { if (b && b.doc) { add(b.doc.id, 'Beleg vom ' + fmtDate(b.date) + ' zu „' + p.name + '“'); add(b.doc.thumbId, 'Vorschaubild des Belegs vom ' + fmtDate(b.date)); } }));
   return refs;
 }
 
@@ -1044,6 +1057,7 @@ export function validateZipJson(d){
   const teile = [].concat(Array.isArray(d.teile) ? d.teile : [], d.verwaist && Array.isArray(d.verwaist.teile) ? d.verwaist.teile : []);
   if (d.version < 10 && teile.some(hasV10Part)) throw new Error('Die Sicherung ist beschädigt (Artikelangaben oder Artikelbilder in einer Sicherung vor Version 10).');
   if (d.version < 11 && teile.some(hasV11Part)) throw new Error('Die Sicherung ist beschädigt (Mehrfachzuordnung oder Einkaufspreise in einer Sicherung vor Version 11).');
+  if (d.version < 12 && teile.some(hasV12Part)) throw new Error('Die Sicherung ist beschädigt (Einkäufe aus Rechnungsfotos in einer Sicherung vor Version 12).');
   const navigation = navigationOf(d.navigation);
   const map = {}; COLLS.forEach(k => { map[k] = d[KEYS[k]]; });
   const next = strictCollections(map);

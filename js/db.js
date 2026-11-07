@@ -157,6 +157,8 @@ export const epochOf = meta => { const i = (meta || []).find(m => m && m.k === '
 /* Atomarer Schreibvorgang.
    ops: [{store, type: 'put'|'del'|'patch'|'clear'|'delBike'|'adjust', value | id | patch}]
      delBike: Motorrad samt aller gespeicherten Einträge mit bike === id entfernen (Teile mit 'both' bleiben)
+     create (nur parts, ab 1.6.0): {value, op} – Artikel genau einmal anlegen: schon angewendet (op im Vorgangsbuch) → nichts;
+       gibt es die Kennung schon ohne diesen Vorgang → Fehler 'changed'.
      adjust (nur parts): {id, op, add, low, set} – Anzahl um add ändern (Ergebnis 0 … 99999), bei low danach
        „nachkaufen ab“ mindestens auf den Bestand setzen, set: weitere Felder im selben Schritt (Name, Motorrad,
        nachkaufen ab). op: feste Vorgangskennung; schon angewendet → nichts ändern (Ergebnis dup).
@@ -174,11 +176,12 @@ const needsBike = o => {
   if (o.type === 'put') return !!o.value && (DEP.includes(o.store) || (o.store === 'parts' && o.value.bike !== 'both'));
   if (o.type === 'patch') return !!o.patch && Object.prototype.hasOwnProperty.call(o.patch, 'bike') && (DEP.includes(o.store) || (o.store === 'parts' && o.patch.bike !== 'both'));
   if (o.type === 'adjust') return !!o.set && Object.prototype.hasOwnProperty.call(o.set, 'bike') && o.set.bike !== 'both';
+  if (o.type === 'create') return !!o.value && o.value.bike !== 'both';
   return false;
 };
 /* Motorräder, die es für den Vorgang geben muss. Ab 1.5.0 bei Lagerartikeln mit Auswahl ('some') jedes ausgewählte. */
 const bikesOfOp = o => {
-  const v = o.type === 'put' ? o.value : o.type === 'adjust' ? o.set : o.patch;
+  const v = o.type === 'put' || o.type === 'create' ? o.value : o.type === 'adjust' ? o.set : o.patch;
   if (o.store === 'parts' && v.bike === 'some') return Array.isArray(v.bikes) ? v.bikes : [];
   return [v.bike];
 };
@@ -195,8 +198,8 @@ export function commit(ops, opts){
     const stores = new Set(ops.map(o => o.store));
     const bump = opts.bump === true || (opts.bump !== false && ops.some(o => REC.includes(o.store)));
     const guard = typeof opts.epoch === 'string';
-    const adj = ops.filter(o => o.type === 'adjust');
-    if (adj.some(o => o.store !== 'parts' || !validOp(o.op) || !Number.isInteger(o.add))) { reject({code: 'invalid', message: 'Ungültige Bestandsänderung'}); return; }
+    const adj = ops.filter(o => o.type === 'adjust' || o.type === 'create');
+    if (adj.some(o => o.store !== 'parts' || !validOp(o.op) || (o.type === 'adjust' ? !Number.isInteger(o.add) : !(o.value && typeof o.value.id === 'string')))) { reject({code: 'invalid', message: 'Ungültige Bestandsänderung'}); return; }
     if (bump || guard || adj.length || opts.expectMeta) stores.add('meta');
     const expect = opts.expect && typeof opts.expect.fp === 'string' ? opts.expect : null;
     if (expect) ['bikes', 'log', 'rides'].forEach(s => stores.add(s));
@@ -272,10 +275,25 @@ export function commit(ops, opts){
                 d.qty = clampQty(clampQty(d.qty) + o.add);
                 if (o.set) Object.assign(d, o.set);
                 /* Ab 1.5.0: Einkauf (Zugang) mit Preis genau einmal je Vorgang festhalten */
-                if (o.buy) d.buys = (Array.isArray(d.buys) ? d.buys : []).concat([Object.assign({}, o.buy, {op: o.op})]);
+                /* Ab 1.6.0 in derselben Form wie beim Anlegen (cleanBuy): fehlende Angaben als leere Standardwerte, damit eine
+                   Sicherung den Einkauf unverändert zurückbringt */
+                if (o.buy) d.buys = (Array.isArray(d.buys) ? d.buys : []).concat([Object.assign({unit: '', pack: '', vendor: '', doc: null, docHash: ''}, o.buy, {op: o.op})]);
                 if (o.low) d.min = Math.max(clampQty(d.min), d.qty);
                 st.put(d); led.ids[o.op] = Date.now();
                 result.adjusted.push({id: o.id, doc: d, dup: false});
+              }
+              if (--adjLeft === 0) { pruneLedger(led); tx.objectStore('meta').put(led); }
+            };
+          } else if (o.type === 'create') {
+            /* Ab 1.6.0: neuer Artikel aus einem Beleg – genau einmal, auch bei Wiederholung nach unklarem Ergebnis */
+            const r = st.get(o.value.id);
+            r.onsuccess = () => {
+              if (injected) return;
+              if (led.ids[o.op]) result.adjusted.push({id: o.value.id, doc: r.result || null, dup: true});
+              else if (r.result) { fail({code: 'changed', message: 'Diese Kennung ist schon vergeben.'}); return; }
+              else {
+                if (Array.isArray(o.value.buys) && o.value.buys.length > MAX_BUYS) { fail({code: 'limit', message: 'Zu viele Einkäufe.'}); return; }
+                st.put(o.value); led.ids[o.op] = Date.now(); result.adjusted.push({id: o.value.id, doc: o.value, dup: false});
               }
               if (--adjLeft === 0) { pruneLedger(led); tx.objectStore('meta').put(led); }
             };
