@@ -205,20 +205,28 @@ export function fillPrice(p, forFill){
 export function renderBuys(p, fill){
   const box = $('#pBuys'); if (!box) return;
   if (!p) { box.hidden = true; box.innerHTML = ''; return; }
-  /* Ab 1.5.0 (Prüfung PR 6): jeder Einkauf mit seinem eigenen, damals bestätigten Bezug – nicht mit der heutigen Einheit */
-  const sum = buySum(p), buys = (p.buys || []).slice().reverse();
-  /* Ab 1.6.0: Einkauf aus einem Beleg – Händler und Belegbild (zum Vergrößern) */
-  const rows = buys.slice(0, 20).map(b => '<div class="buy"><span>' + esc(fmtDate(b.date)) + ' · ' + fmt(b.qty, 0) + ' ' + esc(buyUnit(b)) + (b.price == null ? ' · Preis nicht erfasst' : ' à ' + esc(fmtPrice(b.price))) + (b.vendor ? ' · ' + esc(b.vendor) : '') + '</span>'
-    + (b.doc ? '<button class="mini doc-btn" type="button" data-photo="' + esc(b.doc.id) + '" aria-label="Beleg vom ' + esc(fmtDate(b.date)) + ' anzeigen">Beleg</button>' : '')
-    + (b.price == null ? '' : '<b>' + esc(fmtPrice(b.price * b.qty)) + '</b>') + '</div>').join('');
-  const per = sum.groups.map(g => fmt(g.qty, 0) + ' ' + buyUnit(g)).join(' und ');
   box.hidden = false;
-  box.innerHTML = '<span class="lbl">Einkäufe</span>'
-    + (buys.length ? '<div class="buy-list">' + rows + '</div>' + (buys.length > 20 ? '<p class="hint">Die letzten 20 von ' + fmt(buys.length, 0) + ' Einkäufen; die Summe enthält alle.</p>' : '')
-      + '<p class="hint" id="pBuySum">Dokumentiert: ' + esc(fmtPrice(sum.cents)) + (per ? ' für ' + esc(per) : '')
+  box.innerHTML = buysHTML(p, 'pBuySum') + (fill ? '' : '<div class="row"><button class="btn ghost" type="button" data-partfill="' + esc(p.id) + '">Einkauf erfassen</button></div>');
+}
+/* Einkaufsverlauf eines Artikels (Formular und ab 1.7.1 Artikeldetails): jeder Einkauf mit seinem eigenen, damals bestätigten
+   Bezug (ab 1.5.0, Prüfung PR 6), Händler und Belegbild (ab 1.6.0), Summe nur über erfasste Preise */
+export function buysHTML(p, sumId){
+  const sum = buySum(p), buys = (p.buys || []).slice().reverse();
+  /* ab 1.7.1 (Prüfung PR 11, R171-1): alle Einkäufe bleiben zugänglich – die neuesten 20 sichtbar, ältere samt Beleg unter
+     „Ältere Einkäufe anzeigen“ (bewusst aufklappen, auch per Tastatur) */
+  const row = b => '<div class="buy"><span>' + esc(fmtDate(b.date)) + ' · ' + fmt(b.qty, 0) + ' ' + esc(buyUnit(b)) + (b.price == null ? ' · Preis nicht erfasst' : ' à ' + esc(fmtPrice(b.price))) + (b.vendor ? ' · ' + esc(b.vendor) : '') + '</span>'
+    + (b.doc ? '<button class="mini doc-btn" type="button" data-photo="' + esc(b.doc.id) + '" aria-label="Beleg vom ' + esc(fmtDate(b.date)) + ' anzeigen">Beleg</button>' : '')
+    + (b.price == null ? '' : '<b>' + esc(fmtPrice(b.price * b.qty)) + '</b>') + '</div>';
+  const rows = buys.slice(0, 20).map(row).join(''), older = buys.slice(20);
+  const per = sum.groups.map(g => fmt(g.qty, 0) + ' ' + buyUnit(g)).join(' und ');
+  const sid = sumId ? ' id="' + sumId + '"' : '';
+  return '<span class="lbl">Einkäufe</span>'
+    + (buys.length ? '<div class="buy-list">' + rows + '</div>'
+      + (older.length ? '<details class="buy-older"><summary>Ältere Einkäufe anzeigen (' + fmt(older.length, 0) + ')</summary><div class="buy-list">' + older.map(row).join('') + '</div></details>'
+        + '<p class="hint">Die letzten 20 von ' + fmt(buys.length, 0) + ' Einkäufen stehen oben, ältere unter „Ältere Einkäufe anzeigen“; die Summe enthält alle.</p>' : '')
+      + '<p class="hint"' + sid + '>Dokumentiert: ' + esc(fmtPrice(sum.cents)) + (per ? ' für ' + esc(per) : '')
       + (sum.unknown ? '; ' + fmt(sum.unknown, 0) + ' ohne Preis' : '') + '. Bestand ohne erfassten Einkauf gilt als „Preis unbekannt“.</p>'
-      : '<p class="hint" id="pBuySum">Noch kein Einkauf mit Preis erfasst. Der vorhandene Bestand gilt als „Preis unbekannt“.</p>')
-    + (fill ? '' : '<div class="row"><button class="btn ghost" type="button" data-partfill="' + esc(p.id) + '">Einkauf erfassen</button></div>');
+      : '<p class="hint"' + sid + '>Noch kein Einkauf mit Preis erfasst. Der vorhandene Bestand gilt als „Preis unbekannt“.</p>');
 }
 /* Preisbezug ausdrücklich: je Stück oder je Gebinde mit der erfassten Gebindegröße (z. B. „39,90 € je Gebinde (4 L)“) */
 export const unitText = p => { const u = unitName(p && p.unit); return u === 'Gebinde' && str(p.pack) ? u + ' (' + str(p.pack) + ')' : u; };

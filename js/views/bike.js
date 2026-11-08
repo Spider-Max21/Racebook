@@ -13,6 +13,7 @@ import {$, $$, toast, errText, arm, VErr, fieldNum, fieldDate, imgTag, hydrate, 
 import {makePhoto, makeBikePhoto, makePdf, makeArticlePhoto} from '../images.js';
 import * as stock from './stock.js';
 import * as beleg from './beleg.js';
+import * as artikel from './artikel.js';
 import * as mounts from '../mounts.js';
 import * as teile from './teilehistorie.js';
 import * as ocr from '../ocr.js';
@@ -285,7 +286,8 @@ export function closeDraft(k){
   /* Ab 1.6.0: Beleg übernommen (auch wenn ein unklarer Versuch nachträglich als gespeichert erkannt wird) */
   else if (k === 'rcptForm') beleg.close();
   else if (k === 'histForm') teile.close();   /* ab 1.7.0: Teilehistorie */
-  else if (k === 'partForm') { stock.dropCap(); stock.dropImg(); S.fill = null; $('#pName').value = ''; $('#pQty').value = '1'; $('#pMin').value = '1'; stock.fillExtra(null); stock.fillPrice(null); stock.clearMarks(); partEditMode(null); renderPartBike(); stock.renderBikePick([]); }
+  else if (k === 'partForm') { const wasEdit = !!$('#partForm').dataset.part; if (wasEdit) { const d = $('#partFormBox'); if (d) d.open = false; }   /* ab 1.7.1: Bearbeiten/Auffüllen beendet → Formular zu */
+    stock.dropCap(); stock.dropImg(); S.fill = null; $('#pName').value = ''; $('#pQty').value = '1'; $('#pMin').value = '1'; stock.fillExtra(null); stock.fillPrice(null); stock.clearMarks(); partEditMode(null); renderPartBike(); stock.renderBikePick([]); }
   else if (k === 'addBikeForm') { S.adding = false; dropAddPhoto(); const el = $('#addBike'); if (el) el.innerHTML = ''; }
   else if (k === 'defectForm' || k === 'defDoneForm') { R.closeDefectDraft(k); }
   bumpGen(k);
@@ -314,6 +316,7 @@ function partEditMode(ex, base){
   const h = $('#partEditHint'); h.hidden = !ex;
   h.textContent = ex ? 'Du änderst den vorhandenen Posten „' + ex.name + '“ (beim Öffnen ' + fmt(base, 0) + ' im Vorrat). Anzahl = Bestand nach dem Speichern. Kauft jemand in einem anderen Fenster gleichzeitig dazu, wird beides gezählt.' : '';
   partModeUi();
+  placePartForm();   /* ab 1.7.1: beim Bearbeiten aus den Details dort, sonst unter „Artikel hinzufügen“ */
 }
 /* Ab 1.4.0: Formular je nach Art (neuer Artikel, aus Foto, Bearbeiten, Auffüllen); Bild, Vorschlag, passende Artikel */
 function partModeUi(){
@@ -1111,18 +1114,44 @@ export function renderInventory(){
   const fits = p => which === 'all' || (which === 'check' ? partNeedsCheck(p) : which === 'both' ? p.bike === 'both' : partFor(p, which));
   const parts = S.parts.filter(p => fits(p) && (!term || hay(p).includes(term)) && (!lowOnly || p.qty <= p.min)).sort((a, c) => (a.name || '').localeCompare(c.name || '', 'de'));
   $('#partsCount').textContent = parts.length ? parts.length + (parts.length === 1 ? ' Teil' : ' Teile') : '';
-  $('#partsBody').innerHTML = parts.length ? parts.map(p => {
-    const low = p.qty <= p.min;
-    const forB = p.bike === 'both' ? 'alle Motorräder' : p.bike === 'some' ? stock.assignmentText(p) : S.bikes[p.bike] ? titleOf(S.bikes[p.bike]) : 'nicht zugeordnet';
-    const price = stock.priceLine(p);
-    const info = stock.label(p), pic = p.photo ? '<button class="thumb-btn part-pic" type="button" data-photo="' + esc(p.photo.id) + '" aria-label="Bild von ' + esc(p.name) + ' vergrößern">' + imgTag(p.photo.thumbId || p.photo.id, 'Bild von ' + p.name, 'part-thumb', ' loading="lazy"') + '</button>' : '';
-    return '<div class="part' + (low ? ' low' : '') + '"><div class="part-main">' + pic + '<div><div class="part-name">' + esc(p.name) + '</div>' + (info ? '<div class="item-sub">' + esc(info) + '</div>' : '') + '<div class="item-sub">' + (partNeedsCheck(p) ? '<span class="txt-warn">Zuordnung prüfen</span>' : 'für ' + esc(forB)) + (price ? ' · ' + esc(price) : '') + ' · nachkaufen ab ' + fmt(p.min, 0) + (low ? ' · <span class="txt-bad">knapp</span>' : '') + '</div></div></div>'
-      + '<div class="qty"><button class="mini" type="button" data-partedit="' + esc(p.id) + '" aria-label="' + esc(p.name) + ' bearbeiten">Bearbeiten</button><button class="mini" type="button" data-qty="' + esc(p.id) + '" data-d="-1" aria-label="' + esc(p.name) + ': eins weniger"' + (S.qtyBusy.has(p.id) ? ' disabled' : '') + '>−</button><b aria-label="Anzahl">' + fmt(p.qty, 0) + '</b><button class="mini" type="button" data-qty="' + esc(p.id) + '" data-d="1" aria-label="' + esc(p.name) + ': eins mehr"' + (S.qtyBusy.has(p.id) ? ' disabled' : '') + '>+</button><button class="mini" type="button" data-del="parts/' + esc(p.id) + '" data-arm="Weg?" aria-label="' + esc(p.name) + ' entfernen">×</button></div></div>';
-  }).join('') : '<p class="hint">Keine passenden Teile. Ändere die Filter oder füge einen Artikel hinzu.</p>';
+  /* ab 1.7.1 (Issue #10): je Artikel eine Karte; Antippen von Bild/Bezeichnung öffnet die Details (#/lager/<Artikel>) */
+  $('#partsBody').innerHTML = parts.length ? parts.map(p => artikel.cardHTML(p, titleOf)).join('')
+    : (S.parts.length ? '<p class="hint">Keine passenden Teile. Ändere die Filter oder die Suche.</p>' : '<p class="hint">Das Lager ist noch leer. Neue Artikel nimmst du unten unter „Artikel hinzufügen“ auf.</p>');
   hydrate($('#partsBody'));
+  renderPartDetail();
   renderPartBike(); stock.fillCats();
   if (S.cap) stock.renderMatch(S.parts);
   beleg.refresh();
+}
+
+/* ab 1.7.1: Artikeldetails (Adresse #/lager/<Artikel>). Anschauen ändert nichts. Bearbeiten/Auffüllen dieses Artikels zeigt das
+   vorhandene Formular an einem festen Platz in den Details; sonst liegt es unter „Artikel hinzufügen“. */
+function renderPartDetail(){
+  const pid = R.route.page === 'inventory' ? (R.route.part || '') : '', box = $('#partDetail');
+  if (!box) return;
+  const showList = !pid;
+  box.hidden = showList;
+  ['#g-stock', '#g-add', '.inventory-filters', '#inventoryTitle + .page-intro'].forEach(sel => { const el = $(sel); if (el) el.hidden = !showList; });
+  if (pid) {
+    const raw = store.peek('parts', pid), p = raw ? Object.assign(clone(raw), {id: pid}) : null;
+    const body = artikel.detailBody(p, titleOf), foot = artikel.detailFoot(p), bb = $('#partDetailBody'), ff = $('#partDetailFoot');
+    if (bb.dataset.v !== body) { bb.innerHTML = body; bb.dataset.v = body; hydrate(bb); }
+    if (ff.dataset.v !== foot) { ff.innerHTML = foot; ff.dataset.v = foot; }
+  }
+  placePartForm();
+}
+/* ab 1.7.1: Liegt in diesen Artikeldetails ein geänderter Bearbeiten-Entwurf (oder wird gerade gespeichert)? Nur dann fragt das
+   Verlassen der Details nach. Ein angefangener neuer Artikel oder ein Beleg liegt in der Liste und bleibt dort einfach erhalten. */
+export function partDraftIn(route){
+  if (drafts.busySaving()) return true;
+  const f = $('#partForm');
+  return !!(route && route.page === 'inventory' && route.part && f && f.dataset.part === route.part && drafts.dirtyKeys().includes('part'));
+}
+function placePartForm(){
+  const box = $('#partFormBox'), f = $('#partForm'); if (!box || !f) return;
+  const pid = R.route.page === 'inventory' ? (R.route.part || '') : '';
+  const here = pid && f.dataset.part === pid ? $('#partDetailForm') : $('#partFormHome');
+  if (here && box.parentElement !== here) here.appendChild(box);
 }
 
 function renderGarage(){
@@ -1825,6 +1854,10 @@ export async function onClick(t){
   /* Ab 1.6.0: Beleg übernehmen */
   if (await beleg.onClick(t)) return true;
   if (await teile.onClick(t)) return true;   /* ab 1.7.0: Teilehistorie */
+  /* ab 1.7.1: Artikeldetails öffnen bzw. zurück zur Liste (Suche, Filter, Scrollposition bleiben). Anschauen beginnt keinen
+     Entwurf; ein offener Bearbeiten-Entwurf schützt die bekannte Rückfrage beim Zurück. */
+  if (t.dataset.partview) { R.navigate({page: 'inventory', part: t.dataset.partview}); return true; }
+  if (t.dataset.partback != null) { if (partDraftIn(R.route)) R.go({page: 'inventory'}); else R.navigate({page: 'inventory'}); return true; }
   /* Anderen Artikel bearbeiten = neuer Vorgang: geänderte Eingaben erst klären (ab 1.3.1). Derselbe, schon offene Artikel:
      den Entwurf behalten und nur hinspringen. */
   if (t.dataset.partedit && $('#partForm').dataset.part === t.dataset.partedit && $('#partForm').closest('details').open) { $('#pName').focus(); $('#partForm').scrollIntoView({block: 'nearest'}); return true; }
@@ -1967,7 +2000,11 @@ export async function onClick(t){
     if (!arm(t)) return true;
     const [coll, id] = t.dataset.del.split('/');
     const doc = S[coll] && Array.isArray(S[coll]) ? S[coll].find(x => x.id === id) : null;
-    if (await sDel(coll, id)) { toast('Gelöscht.'); if (doc) cleanupFiles(payloadFiles(doc)); }
+    if (await sDel(coll, id)) {
+      toast('Gelöscht.'); if (doc) cleanupFiles(payloadFiles(doc));
+      /* ab 1.7.1: aus den Artikeldetails gelöscht → zurück zur Liste */
+      if (coll === 'parts' && R.route.page === 'inventory' && R.route.part === id) R.navigate({page: 'inventory'}, {replace: true});
+    }
     return true;
   }
   if (t.dataset.qty) {
@@ -2348,7 +2385,9 @@ function registerDrafts(){
   beleg.register(show('inventory', 'rcptForm'));   /* ab 1.6.0: Beleg übernehmen */
   teile.register(show('components', 'histBox'));   /* ab 1.7.0: Teilehistorie */
   drafts.register({key: 'part', label: 'Teil', root: () => $('#partForm'), extra: () => ($('#partForm').dataset.part || '') + stock.sig(), save: submitOf('partForm'), discard: () => { parkOp('partForm'); closeDraft('partForm'); },
-    isOpen: () => !!$('#partForm').dataset.part || !!S.cap || !!(partDet() && partDet().open), close: () => { parkOp('partForm'); closeDraft('partForm'); const d = partDet(); if (d) d.open = false; }, reveal: show('inventory', 'g-parts')});
+    isOpen: () => !!$('#partForm').dataset.part || !!S.cap || !!(partDet() && partDet().open), close: () => { parkOp('partForm'); closeDraft('partForm'); const d = partDet(); if (d) d.open = false; },
+    /* ab 1.7.1: ein Bearbeiten-Entwurf aus den Artikeldetails wird dort wieder gezeigt */
+    reveal: () => { const pid = $('#partForm').dataset.part; if (pid && S.parts.some(x => x.id === pid) && R.route.page === 'inventory' && R.route.part === pid) { const d = partDet(); if (d) d.open = true; return; } show('inventory', 'g-parts')(); }});
   drafts.register({key: 'meter', label: 'Zählerwechsel', root: () => $('#meterForm'), save: submitOf('meterForm'), discard: () => { parkOp('meterForm'); closeDraft('meterForm'); },
     isOpen: () => !!($('#g-meter') && $('#g-meter').open), close: () => { parkOp('meterForm'); closeDraft('meterForm'); $('#g-meter').open = false; }, reveal: show('vehicle', 'g-meter', 'g-meter')});
   [['bike', 'Motorrad bearbeiten', 'bikeForm', 'g-bike'], ['tc', 'Reifen & Kette', 'tcForm', 'g-tc'], ['oil', 'Öle & Flüssigkeiten', 'oilForm', 'g-oil'], ['int', 'Wartungsintervalle', 'intForm', 'g-int'], ['oem', 'Herstellervorgaben', 'oemForm', 'oemBody']].forEach(([k, label, id, anchor]) => {

@@ -205,12 +205,17 @@ function applyRoute(r){
   }
   if (S.mode === 'ready' && r.page === 'add' && R.route.page !== 'add') { S.adding = true; const el = $('#addBike'); if (el) el.innerHTML = ''; }
   const changed = R.route.page !== r.page || R.route.bike !== r.bike;
+  /* ab 1.7.1: Lager ↔ Artikeldetails – Scrollposition der Liste merken und beim Zurückkehren wiederherstellen */
+  const invFrom = R.route.page === 'inventory' ? (R.route.part || '') : null, invTo = r.page === 'inventory' ? (r.part || '') : null;
+  if (invFrom === '' && invTo) S.invScroll = window.scrollY;
   R.route = r;
   showPage(S.mode === 'error' ? 'error' : r.page);
   if (r.page === 'bike') { $$('#v-bike .sub').forEach(s => { s.hidden = s.id !== 'v-' + r.section; }); }
   if (r.page === 'data') { data.refreshStorage().then(() => { if (R.route.page === 'data') data.renderData(); }); }
   renderAll();
-  if (changed) window.scrollTo(0, 0);
+  if (invTo && invTo !== invFrom) { window.scrollTo(0, 0); const h = document.getElementById('partDetailTitle'); if (h) h.focus({preventScroll: true}); }
+  else if (invTo === '' && invFrom) { window.scrollTo(0, S.invScroll || 0); const c = document.querySelector('[data-partview="' + CSS.escape(invFrom) + '"]'); if (c) c.focus({preventScroll: true}); }
+  else if (changed) window.scrollTo(0, 0);
 }
 function navigate(r, opts){
   opts = opts || {};
@@ -243,7 +248,9 @@ function onPop(){
   const r = parseRoute();
   if (routeHash(r) === routeHash(R.route)) { popSkip = false; return; }
   if (popSkip) { popSkip = false; applyRoute(r); return; }
-  if (S.mode === 'ready' && !(window.__T && window.__T.leaveAuto === 'bypass') && (drafts.dirtyKeys().length || drafts.busySaving())) {
+  /* ab 1.7.1: innerhalb des Lagers (Liste ↔ Artikeldetails) nur nachfragen, wenn die verlassenen Details einen geänderten Entwurf enthalten */
+  const inStock = R.route.page === 'inventory' && r.page === 'inventory' && !bike.partDraftIn(R.route);
+  if (S.mode === 'ready' && !(window.__T && window.__T.leaveAuto === 'bypass') && !inStock && (drafts.dirtyKeys().length || drafts.busySaving())) {
     const depth = (history.state && history.state.rb) || 0;
     try { history.pushState({rb: depth + 1}, '', routeHash(R.route)); } catch (e) {}
     drafts.guard(() => { popSkip = true; history.back(); });

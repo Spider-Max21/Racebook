@@ -311,22 +311,23 @@
       <div class="f"><label for="inventorySearch">Teile suchen</label><input type="search" id="inventorySearch" placeholder="z. B. Ölfilter" data-nodirty></div>
       <div class="f"><label for="inventoryBike">Motorrad</label><select id="inventoryBike" data-nodirty><option value="all">Alle Bestände</option></select></div>
     </div><label class="check-filter"><input type="checkbox" id="inventoryLow" data-nodirty> Nur nachzukaufen</label></div>
-      <div class="card" id="g-parts">
-        <div class="card-h"><h2>Lagerbestand</h2><span class="tag" id="partsCount"></span></div>
-        <div id="partsBody"></div>
-        <div class="capture-row" id="captureRow">
-          <label class="btn" for="capCam"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Foto aufnehmen</label><input type="file" id="capCam" accept="image/*" capture="environment" class="sr-file" data-nodirty>
-          <label class="btn" for="capPick"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4z"/><path d="M4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="8.5" r="1.5"/></svg>Bild auswählen</label><input type="file" id="capPick" accept="image/*" class="sr-file" data-nodirty>
-          <p class="hint">Artikel aus einem Foto oder Bildschirmfoto erfassen: Racebook liest den Text auf dem Etikett direkt auf diesem Gerät und schlägt die Angaben vor. Du prüfst alles und bestätigst Anzahl und Motorrad selbst.</p>
-        </div>
-        <div class="capture-row" id="rcptRow">
-          <label class="btn" for="rcptCam"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3h12v18l-2-1.5L14 21l-2-1.5L10 21l-2-1.5L6 21z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>Beleg fotografieren</label><input type="file" id="rcptCam" accept="image/*" capture="environment" class="sr-file" data-nodirty>
-          <label class="btn" for="rcptPick"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4z"/><path d="M4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="8.5" r="1.5"/></svg>Beleg auswählen</label><input type="file" id="rcptPick" accept="image/*" class="sr-file" data-nodirty>
-          <p class="hint">Rechnung oder Ausschnitt einer Rechnung: Racebook liest die Positionen auf diesem Gerät und schlägt sie vor. Du wählst aus, prüfst und bestätigst; erst dann ändert sich das Lager.</p>
-        </div>
-        <form id="rcptForm" class="card rcpt" hidden novalidate></form>
-        <details class="form-card" style="margin-top:10px">
-          <summary><h3 id="partFormTitle">Teil hinzufügen</h3></summary>
+      <div id="g-parts">
+      <!-- ab 1.7.1 (Issue #10): Lagerbestand (je Artikel eine Karte) und Neuerfassung klar getrennt; Details eines Artikels unter #/lager/<Artikel> -->
+      <section class="card part-detail" id="partDetail" hidden aria-labelledby="partDetailTitle">
+        <div id="partDetailBody"></div>
+        <div id="partDetailForm"></div>
+        <div id="partDetailFoot"></div>
+      </section>
+      <section class="card" id="g-stock" aria-labelledby="stockTitle">
+        <div class="card-h"><h2 id="stockTitle">Lagerbestand</h2><span class="tag" id="partsCount"></span></div>
+        <div id="partsBody" class="part-list"></div>
+      </section>
+      <section class="card add-card" id="g-add" aria-labelledby="addTitle">
+        <div class="card-h"><h2 id="addTitle">Artikel hinzufügen</h2></div>
+        <p class="hint">Neuen Artikel ins Lager aufnehmen – wähle einen Weg:</p>
+        <div id="partFormHome">
+        <details class="form-card add-way" id="partFormBox">
+          <summary><span class="add-way-h"><h3 id="partFormTitle">Teil hinzufügen</h3><span class="hint add-way-sub">von Hand eingeben</span></span></summary>
           <form id="partForm" class="grid">
             <p class="hint f full" id="partEditHint" hidden></p>
             <p class="warnbox f full" id="partConflict" role="alert" hidden></p>
@@ -358,6 +359,25 @@
             <div class="f full row"><button class="btn primary" type="submit" id="pSave">Hinzufügen</button><button class="btn ghost" type="button" id="pCancel" hidden>Abbrechen</button></div>
           </form>
         </details>
+        </div>
+        <details class="form-card add-way" id="addPhoto">
+          <summary><span class="add-way-h"><h3>Aus einem Artikelfoto</h3><span class="hint add-way-sub">Etikett oder Bildschirmfoto</span></span></summary>
+          <div class="capture-row" id="captureRow">
+            <label class="btn" for="capCam"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Foto aufnehmen</label><input type="file" id="capCam" accept="image/*" capture="environment" class="sr-file" data-nodirty>
+            <label class="btn" for="capPick"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4z"/><path d="M4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="8.5" r="1.5"/></svg>Bild auswählen</label><input type="file" id="capPick" accept="image/*" class="sr-file" data-nodirty>
+            <p class="hint">Racebook liest den Text auf dem Etikett direkt auf diesem Gerät und schlägt die Angaben vor. Du prüfst alles und bestätigst Anzahl und Motorrad selbst.</p>
+          </div>
+        </details>
+        <details class="form-card add-way" id="addReceipt">
+          <summary><span class="add-way-h"><h3>Aus einem Beleg</h3><span class="hint add-way-sub">Rechnung oder Ausschnitt</span></span></summary>
+          <div class="capture-row" id="rcptRow">
+            <label class="btn" for="rcptCam"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3h12v18l-2-1.5L14 21l-2-1.5L10 21l-2-1.5L6 21z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>Beleg fotografieren</label><input type="file" id="rcptCam" accept="image/*" capture="environment" class="sr-file" data-nodirty>
+            <label class="btn" for="rcptPick"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 5h16v14H4z"/><path d="M4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="8.5" r="1.5"/></svg>Beleg auswählen</label><input type="file" id="rcptPick" accept="image/*" class="sr-file" data-nodirty>
+            <p class="hint">Racebook liest die Positionen auf diesem Gerät und schlägt sie vor. Du wählst aus, prüfst und bestätigst; erst dann ändert sich das Lager.</p>
+          </div>
+        </details>
+        <form id="rcptForm" class="card rcpt" hidden novalidate></form>
+      </section>
       </div>
   </section>
   <section id="v-navigation" class="view" hidden aria-labelledby="navigationTitle">

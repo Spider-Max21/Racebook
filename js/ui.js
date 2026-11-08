@@ -140,7 +140,7 @@ export function parseRoute(h){
   h = String(h == null ? location.hash : h).replace(/^#/, '');
   const p = h.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch (e) { return ''; } });
   if (p[0] === 'bike' && p[1]) return {page: 'bike', bike: p[1], section: p[2] === 'garage' ? 'vehicle' : SECTIONS.some(s => s[0] === p[2]) ? p[2] : 'status'};
-  if (p[0] === 'lager') return {page: 'inventory'};
+  if (p[0] === 'lager') return p[1] ? {page: 'inventory', part: p[1]} : {page: 'inventory'};   /* ab 1.7.1: Artikeldetails */
   if (p[0] === 'menue') return {page: 'navigation'};
   if (p[0] === 'einstellungen') return {page: 'data'};
   if (p[0] === 'daten') return {page: 'data'};
@@ -150,7 +150,7 @@ export function parseRoute(h){
 }
 export function routeHash(r){
   if (r.page === 'bike') return '#/bike/' + encodeURIComponent(r.bike) + '/' + (r.section || 'status');
-  if (r.page === 'inventory') return '#/lager';
+  if (r.page === 'inventory') return '#/lager' + (r.part ? '/' + encodeURIComponent(r.part) : '');
   if (r.page === 'navigation') return '#/menue';
   if (r.page === 'data') return '#/einstellungen';
   if (r.page === 'help') return '#/hilfe';
