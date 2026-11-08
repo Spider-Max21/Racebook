@@ -5,11 +5,11 @@
 import * as DB from './db.js';
 import {makeZip, readZip, isZip} from './zip.js';
 import {sha256, sniff} from './images.js';
-import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans, needsV6, needsV7, needsV8, needsV10, needsV11, needsV12, ZIP_FORMAT, ZIP_VERSION, ZIP_VERSION_V11, ZIP_VERSION_V10, ZIP_VERSION_NAV, ZIP_VERSION_V8, ZIP_VERSION_POS, ZIP_VERSION_METER, ZIP_VERSION_ORPH, ZIP_VERSION_PLAIN, DEP_COLLS, KEYS, NAMES} from './domain.js';
+import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans, needsV6, needsV7, needsV8, needsV10, needsV11, needsV12, needsV13, ZIP_FORMAT, ZIP_VERSION, ZIP_VERSION_V12, ZIP_VERSION_V11, ZIP_VERSION_V10, ZIP_VERSION_NAV, ZIP_VERSION_V8, ZIP_VERSION_POS, ZIP_VERSION_METER, ZIP_VERSION_ORPH, ZIP_VERSION_PLAIN, DEP_COLLS, KEYS, NAMES} from './domain.js';
 import {COLLS} from './state.js';
 import {pad, canon, isISO, fmtDate} from './util.js';
 
-export const APP_VERSION = '1.6.0';
+export const APP_VERSION = '1.7.0';
 export const V8_LOCAL_KEY = 'wh-garage-local';
 const MAX_JSON = 60 * 1024 * 1024;
 const enc = new TextEncoder();
@@ -50,7 +50,7 @@ export async function buildBackup(){
   const byId = (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   /* Version nur so hoch wie nötig: ältere App-Versionen können Sicherungen ohne neue Angaben weiter lesen */
   const nav = (recs.meta || []).find(m => m.k === 'navigation') || null;
-  const json = {format: ZIP_FORMAT, version: needsV12(next) ? ZIP_VERSION : needsV11(next) ? ZIP_VERSION_V11 : needsV10(next) ? ZIP_VERSION_V10 : nav ? ZIP_VERSION_NAV : needsV8(next) ? ZIP_VERSION_V8 : needsV7(next) ? ZIP_VERSION_POS : needsV6(next) ? ZIP_VERSION_METER : sp.count ? ZIP_VERSION_ORPH : ZIP_VERSION_PLAIN, app: APP_VERSION, exportiert: now.toISOString(), stand: {changeSeq: info.changeSeq || 0}};
+  const json = {format: ZIP_FORMAT, version: needsV13(next) ? ZIP_VERSION : needsV12(next) ? ZIP_VERSION_V12 : needsV11(next) ? ZIP_VERSION_V11 : needsV10(next) ? ZIP_VERSION_V10 : nav ? ZIP_VERSION_NAV : needsV8(next) ? ZIP_VERSION_V8 : needsV7(next) ? ZIP_VERSION_POS : needsV6(next) ? ZIP_VERSION_METER : sp.count ? ZIP_VERSION_ORPH : ZIP_VERSION_PLAIN, app: APP_VERSION, exportiert: now.toISOString(), stand: {changeSeq: info.changeSeq || 0}};
   COLLS.forEach(c => { json[KEYS[c]] = (recs[c] || []).filter(d => c === 'bikes' || sp.clean[c][d.id]).sort(byId); });
   if (sp.count) {
     json.verwaist = {};

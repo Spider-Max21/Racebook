@@ -142,6 +142,7 @@ function openDraftCount(skipSetup){
   if (Object.values(S.editing || {}).some(Boolean)) n++;
   if ($('#pName') && $('#pName').value) n++;
   if (S.rcpt) n++;
+  if (S.hist) n++;
   return n;
 }
 let resetInfo = null;
@@ -159,6 +160,7 @@ function onDatasetChange(phase){
     Object.keys(S.gen).forEach(k => bumpGen(k));
     bike.closeDraft('partForm');
     bike.closeDraft('rcptForm');   /* ab 1.6.0: offener Beleg (samt laufender Erkennung) gehört zum alten Bestand */
+    bike.closeDraft('histForm');   /* ab 1.7.0: Teilehistorie gehört zum alten Bestand */
     if (S.adding || S.addPhoto) bike.closeDraft('addBikeForm');
     S.shareReady = null; S.oemDraft = null; S.editing = {};
     nav.resetEditor();
@@ -263,6 +265,7 @@ Object.assign(R, {
   renderAll, renderSys, navigate, go, guard: drafts.guard, submitForm, applyTheme, openForm, toGarage: () => drafts.guard(() => toGarage()),
   setBike: id => { if (bike.setBike(id)) navigate({page: 'bike', bike: id, section: S.section || 'status'}); },
   closeDraft: k => bike.closeDraft(k),
+  setSection: (v, a) => bike.setSection(v, a),
   closeDefectDraft: k => defects.closeDefectDraft(k),
   resetDefectForms: () => defects.resetDefectForms(),
   openDefectForm: () => defects.openDefectForm(),

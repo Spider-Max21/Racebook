@@ -56,7 +56,8 @@ export const ZIP_FORMAT = 'racebook-backup';
    Ab 1.6.0 Version 12, wenn ein Einkauf aus einem Rechnungsfoto stammt (Beleg doc, Prüfsumme docHash, Händler vendor).
    1.5.x würde Beleg und Händler beim Einlesen still verwerfen; deshalb lehnt es Version 12 ab.
    Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10 bzw. 11. */
-export const ZIP_VERSION = 12;
+export const ZIP_VERSION = 13;
+export const ZIP_VERSION_V12 = 12;
 export const ZIP_VERSION_V11 = 11;
 export const ZIP_VERSION_V10 = 10;
 export const ZIP_VERSION_NAV = 9;
@@ -88,6 +89,10 @@ export const needsV11 = next => Object.values((next && next.parts) || {}).some(h
 export const hasV12Buy = b => !!b && typeof b === 'object' && (b.doc != null || (b.docHash != null && b.docHash !== '') || (b.vendor != null && b.vendor !== ''));
 export const hasV12Part = p => !!p && typeof p === 'object' && Array.isArray(p.buys) && p.buys.some(hasV12Buy);
 export const needsV12 = next => Object.values((next && next.parts) || {}).some(hasV12Part);
+/* ab 1.7.0 (Roadmap 6): Teilehistorie am Motorrad (hist) oder Angaben zu montierten Reifen/Kette (Hersteller, Einsatz, Bewertung …) */
+export const hasV13Bike = b => !!b && typeof b === 'object' && ((Array.isArray(b.hist) && b.hist.length > 0)
+  || [b.tires && b.tires.front, b.tires && b.tires.rear, b.chain].some(x => !!x && typeof x === 'object' && PART_DETAIL_KEYS.some(k => x[k] != null && x[k] !== '')));
+export const needsV13 = next => Object.values((next && next.bikes) || {}).some(hasV13Bike);
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
 const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && d.bike !== 'some' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
@@ -223,7 +228,7 @@ export function cleanBike(x, strict, where){
     return o;
   }).filter(it => it && it.id && it.name);
   const withC = (o, v, f) => { const c = h.n(v, f + ' Erfassungszeit', {int:true, min:0}); if (c != null && o.at != null && o.date) o.c = c; return o; };
-  const tire = (t, f) => { t = h.o(t, f); return withC({model: h.s(t.model, f + ' Modell', {max:120}), at: h.n(t.at, f + ' Stand', {min:0, max:1e7}), date: h.d(t.date, f + ' Datum') || ''}, t.c, f); };
+  const tire = (t, f) => { t = h.o(t, f); return withC(Object.assign({model: h.s(t.model, f + ' Modell', {max:120}), at: h.n(t.at, f + ' Stand', {min:0, max:1e7}), date: h.d(t.date, f + ' Datum') || ''}, cleanPartDetails(t, h, f)), t.c, f); };
   const tires = h.o(x.tires, 'Reifen'), chain = h.o(x.chain, 'Kette'), fl = h.o(x.fluids, 'Öle'), oem = h.o(x.oem, 'Herstellervorgaben');
   const fluids = {};
   FLUIDS.forEach(([k, l]) => { const f = h.o(fl[k], l); fluids[k] = {brand: h.s(f.brand, l, {max:120}), spec: h.s(f.spec, l, {max:120}), qty: h.s(f.qty, l, {max:60})}; });
@@ -248,8 +253,9 @@ export function cleanBike(x, strict, where){
     unit: h.one(x.unit, 'Einheit', ['h', 'km'], 'h'), current: h.n(x.current, 'Startstand', {min:0, max:1e7}), currentT: h.n(x.currentT, 'Startzeit', {int:true, min:0}),
     color, order: h.n(x.order, 'Reihenfolge', {int:true, min:0, max:9999}), items, fluids,
     tires: {front: tire(tires.front, 'Reifen vorn'), rear: tire(tires.rear, 'Reifen hinten')},
-    chain: withC({front: h.n(chain.front, 'Ritzel', {int:true, min:5, max:99}), rear: h.n(chain.rear, 'Kettenrad', {int:true, min:5, max:99}), brand: h.s(chain.brand, 'Kette', {max:120}), links: h.n(chain.links, 'Kettenglieder', {int:true, min:40, max:250}), at: h.n(chain.at, 'Kette Stand', {min:0, max:1e7}), date: h.d(chain.date, 'Kette Datum') || ''}, chain.c, 'Kette'),
+    chain: withC(Object.assign({front: h.n(chain.front, 'Ritzel', {int:true, min:5, max:99}), rear: h.n(chain.rear, 'Kettenrad', {int:true, min:5, max:99}), brand: h.s(chain.brand, 'Kette', {max:120}), links: h.n(chain.links, 'Kettenglieder', {int:true, min:40, max:250}), at: h.n(chain.at, 'Kette Stand', {min:0, max:1e7}), date: h.d(chain.date, 'Kette Datum') || ''}, cleanPartDetails(chain, h, 'Kette')), chain.c, 'Kette'),
     ...cleanBikeV8(x, h),
+    ...(x.hist != null ? {hist: cleanHist(x.hist, h)} : {}),
     oem: {rows: h.a(oem.rows, 'Herstellervorgaben').filter(r => r && typeof r === 'object').slice(0, 50).map(r => ({when: h.s(r.when, 'Herstellervorgabe', {max:60}), what: h.s(r.what, 'Herstellervorgabe', {max:300})})), note: h.s(oem.note, 'Hinweis', {max:2000}), sourceTitle: h.s(oem.sourceTitle, 'Quelle', {max:200}), sourceUrl: safeUrl(oem.sourceUrl)},
     manual
   };
@@ -269,6 +275,63 @@ function cleanBikeV8(x, h){
   }
   if (x.favs != null) o.favs = Array.from(new Set(h.a(x.favs, 'Favoriten').filter(validId))).slice(0, 40);
   return o;
+}
+/* ---------- Teilehistorie (ab 1.7.0, Roadmap 6) ----------
+   Montierte Reifen und Kette stehen wie bisher in tires.front/tires.rear/chain (model bzw. brand = Modell/Bezeichnung, at/date/c =
+   Montage). Dazu kommen – nur wenn benutzt, bestehende Motorräder bleiben exakt gleich – Angaben zum Teil (PART_DETAIL_KEYS):
+   maker/artNo Hersteller und Artikelnummer; use/track/ground Einsatz (MX/Enduro), Strecke, Untergrund, soweit bekannt; rating 1–5,
+   verdict „Wieder kaufen“/„Nicht noch einmal“, note eigene Erfahrung; prev = früherer Einbau desselben Teils (Wiedermontage).
+   hist = ausgebaute Teile aller Einbauorte und montierte weitere Teile (slot 'x' mit Bauteilname, ohne off):
+   {id, slot, name, model, on: {date, at, c}, off: {date, at, c} | null, reason, …Angaben}. Stände sind Anzeigen des Zählers, der
+   damals eingebaut war (c = Stelle im Verlauf des Tages wie bei der Montage); die Nutzung rechnet über Zählerwechsel (js/mounts.js).
+   Ein ausgebautes Teil ist nicht automatisch verbraucht (reason); der Lagerbestand wird dabei nie verändert. */
+export const PART_USES = [['mx', 'MX'], ['enduro', 'Enduro'], ['mixed', 'MX und Enduro']];
+export const PART_VERDICTS = [['again', 'Wieder kaufen'], ['never', 'Nicht noch einmal']];
+export const PART_REASONS = [['worn', 'verschlissen'], ['defect', 'defekt'], ['preventive', 'vorsorglich gewechselt'], ['swap', 'Wechsel für anderen Einsatz']];
+export const HIST_SLOTS = [['tf', 'Reifen vorn'], ['tr', 'Reifen hinten'], ['chain', 'Kette'], ['x', 'Weiteres Teil']];
+export const PART_DETAIL_KEYS = ['maker', 'artNo', 'use', 'track', 'ground', 'rating', 'verdict', 'note', 'prev'];
+export const MAX_HIST = 500;
+export function cleanPartDetails(t, h, f){
+  const o = {};
+  if (!t || typeof t !== 'object') return o;
+  const s = (k, l, max) => { const v = h.s(t[k], f + ' ' + l, {max}); if (v) o[k] = v; };
+  s('maker', 'Hersteller', 60); s('artNo', 'Artikelnummer', 60); s('track', 'Strecke', 120); s('ground', 'Untergrund', 40); s('note', 'Erfahrung', 500);
+  if (t.use != null && t.use !== '') { const v = h.one(t.use, f + ' Einsatz', PART_USES.map(x => x[0]), ''); if (v) o.use = v; }
+  if (t.verdict != null && t.verdict !== '') { const v = h.one(t.verdict, f + ' Merkhilfe', PART_VERDICTS.map(x => x[0]), ''); if (v) o.verdict = v; }
+  if (t.rating != null) { const v = h.n(t.rating, f + ' Bewertung', {int: true, min: 1, max: 5}); if (v != null) o.rating = v; }
+  if (t.prev != null && t.prev !== '') { if (validId(t.prev)) o.prev = t.prev; else h.fail(f + ' (früherer Einbau)', 'ist ungültig.'); }
+  return o;
+}
+function cleanPos(p, h, f){
+  p = h.o(p, f);
+  const o = {date: h.d(p.date, f + ' Datum') || '', at: h.n(p.at, f + ' Stand', {min: 0, max: 1e7})};
+  const c = h.n(p.c, f + ' Erfassungszeit', {int: true, min: 0});
+  if (c != null && o.at != null && o.date) o.c = c;
+  return o;
+}
+export function cleanHist(v, h){
+  const arr = h.a(v, 'Teilehistorie');
+  if (arr.length > MAX_HIST) h.fail('Teilehistorie', 'hat mehr als ' + MAX_HIST + ' Einträge.');
+  const seen = new Set();
+  return arr.slice(0, MAX_HIST).map((r, i) => {
+    const w = 'Teilehistorie ' + (i + 1);
+    if (!r || typeof r !== 'object' || Array.isArray(r)) { h.fail(w, 'ist ungültig.'); return null; }
+    const id = h.id(r.id, w + ' (ID)'); if (!id) return null;
+    if (seen.has(id)) { h.fail(w, 'kommt doppelt vor.'); return null; }
+    const slot = h.one(r.slot, w + ' (Einbauort)', HIST_SLOTS.map(x => x[0]), '');
+    if (!slot) { h.fail(w + ' (Einbauort)', 'fehlt.'); return null; }
+    const o = {id, slot, name: slot === 'x' ? h.s(r.name, w + ' (Bauteil)', {req: true, max: 60}) : '', model: h.s(r.model, w + ' (Modell)', {max: 120}),
+      on: cleanPos(r.on, h, w + ' Montage'), off: r.off == null ? null : cleanPos(r.off, h, w + ' Ausbau'),
+      reason: h.one(r.reason, w + ' (Grund)', PART_REASONS.map(x => x[0]), '')};
+    Object.assign(o, cleanPartDetails(r, h, w));
+    if (slot === 'x' && !o.name) return null;
+    /* Montierte Reifen und Kette stehen in tires/chain, im Verlauf nur ausgebaute */
+    if (slot !== 'x' && !o.off) { h.fail(w + ' (Ausbau)', 'fehlt.'); return null; }
+    if (slot !== 'x' && !o.model && !o.maker) { h.fail(w, 'hat weder Hersteller noch Modell.'); return null; }
+    if (!o.off) o.reason = '';
+    seen.add(id);
+    return o;
+  }).filter(Boolean);
 }
 export function cleanSnap(x, h){
   if (x == null) return null;
@@ -1054,6 +1117,7 @@ export function validateZipJson(d){
   if (d.version < 6 && logs.some(l => l && typeof l === 'object' && (l.kind === 'meter' || l.fix != null))) throw new Error('Die Sicherung ist beschädigt (Zählerwechsel oder Berichtigungen in einer Sicherung vor Version 6).');
   if (d.version < 8 && (logs.some(hasV8Log) || (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV8Bike))) throw new Error('Die Sicherung ist beschädigt (Tätigkeiten, Checkliste oder Favoriten in einer Sicherung vor Version 8).');
   if (d.version < 9 && d.navigation != null) throw new Error('Menübelegung in einer Sicherung vor Version 9.');
+  if (d.version < 13 && (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV13Bike)) throw new Error('Die Sicherung ist beschädigt (Teilehistorie oder Angaben zu Reifen und Kette in einer Sicherung vor Version 13).');
   const teile = [].concat(Array.isArray(d.teile) ? d.teile : [], d.verwaist && Array.isArray(d.verwaist.teile) ? d.verwaist.teile : []);
   if (d.version < 10 && teile.some(hasV10Part)) throw new Error('Die Sicherung ist beschädigt (Artikelangaben oder Artikelbilder in einer Sicherung vor Version 10).');
   if (d.version < 11 && teile.some(hasV11Part)) throw new Error('Die Sicherung ist beschädigt (Mehrfachzuordnung oder Einkaufspreise in einer Sicherung vor Version 11).');

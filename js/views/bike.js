@@ -13,13 +13,15 @@ import {$, $$, toast, errText, arm, VErr, fieldNum, fieldDate, imgTag, hydrate, 
 import {makePhoto, makeBikePhoto, makePdf, makeArticlePhoto} from '../images.js';
 import * as stock from './stock.js';
 import * as beleg from './beleg.js';
+import * as mounts from '../mounts.js';
+import * as teile from './teilehistorie.js';
 import * as ocr from '../ocr.js';
 import {parseLabel} from '../label.js';
 import {openCropper} from '../cropper.js';
 import {R} from '../registry.js';
 import {jumpOk, typoPlan, checkPlan, openFix, renderMeter, meterPlaceholder, saveMeter, meterName, askSegments, SEG_SAVE_CHANGED} from './counter.js';
 import {CATS, WORK, WORK_BY, catName, searchWork, ivProposal, workEntry, workLabel, customId, isCustom} from '../work.js';
-import {checkListOf, deriveBike, cmpEv, CHECK_MAX, partFor, partNeedsCheck, fmtPrice} from '../domain.js';
+import {checkListOf, deriveBike, cmpEv, CHECK_MAX, partFor, partNeedsCheck, fmtPrice, MAX_HIST} from '../domain.js';
 import * as drafts from '../drafts.js';
 
 /* ---------- Speichern mit Meldung ---------- */
@@ -282,6 +284,7 @@ export function closeDraft(k){
   else if (k === 'setupForm') { resetSetupForm(); $('#setupDetails').open = false; }
   /* Ab 1.6.0: Beleg übernommen (auch wenn ein unklarer Versuch nachträglich als gespeichert erkannt wird) */
   else if (k === 'rcptForm') beleg.close();
+  else if (k === 'histForm') teile.close();   /* ab 1.7.0: Teilehistorie */
   else if (k === 'partForm') { stock.dropCap(); stock.dropImg(); S.fill = null; $('#pName').value = ''; $('#pQty').value = '1'; $('#pMin').value = '1'; stock.fillExtra(null); stock.fillPrice(null); stock.clearMarks(); partEditMode(null); renderPartBike(); stock.renderBikePick([]); }
   else if (k === 'addBikeForm') { S.adding = false; dropAddPhoto(); const el = $('#addBike'); if (el) el.innerHTML = ''; }
   else if (k === 'defectForm' || k === 'defDoneForm') { R.closeDefectDraft(k); }
@@ -551,7 +554,7 @@ export function renderStatus(){
       + (defs.length > 4 ? '<p class="hint">und ' + (defs.length - 4) + ' weitere</p>' : '')
     : '<p class="hint">Keine offenen Mängel.</p>';
   $('#statusDefCount').textContent = defs.length ? defs.length + ' offen' : '';
-  $('#mountSum').innerHTML = mountHTML(b);
+  $('#mountSum').innerHTML = teile.cellsHTML(b, 'status', runtime);   /* ab 1.7.0: antippbar (Teilehistorie) */
   renderChecklist(b);
   hydrate($('#v-status'));
 }
@@ -566,17 +569,6 @@ function runtime(b, x){
   if (m.amb) return 'Zähler unklar, bitte zuordnen';
   if (m.tot > tot + 0.005) return 'Montagestand prüfen';
   return fmt(Math.max(0, Math.round((tot - m.tot) * 100) / 100)) + ' ' + U(b) + ' gelaufen';
-}
-function mountHTML(b){
-  const t = b.tires || {}, c = b.chain || {}, tf = t.front || {}, tr = t.rear || {};
-  const ratio = (c.front && c.rear) ? ' · ' + fmt(c.rear / c.front, 2) : '';
-  const cell = (lbl, val, run) => '<div class="mount-cell"><span class="lbl">' + lbl + '</span><b>' + (val ? esc(val) : '<span class="hint">nicht eingetragen</span>') + '</b>' + (run ? '<span class="run">' + esc(run) + '</span>' : '') + '</div>';
-  return '<div class="mount">'
-    + cell('Reifen vorn', tf.model, runtime(b, tf))
-    + cell('Reifen hinten', tr.model, runtime(b, tr))
-    + cell('Übersetzung', (c.front && c.rear) ? c.front + ' / ' + c.rear + ratio : '', '')
-    + cell('Kette', [c.brand, c.links ? c.links + ' Glieder' : ''].filter(Boolean).join(', '), runtime(b, c))
-    + '</div>';
 }
 
 /* ---------- Checkliste „Vor der Fahrt“ (ab 1.2.0 je Motorrad anpassbar) ----------
@@ -1141,7 +1133,8 @@ function renderGarage(){
     $('#bikeBody').innerHTML = bikePhotoHTML(b) + '<dl class="kv" style="margin-top:12px"><dt>Spitzname</dt><dd>' + esc(b.nickname || '–') + '</dd><dt>Marke</dt><dd>' + esc(b.brand || '–') + '</dd><dt>Modell</dt><dd>' + esc(b.model || '–') + '</dd><dt>Baujahr</dt><dd>' + esc(b.year || '–') + '</dd><dt>Farbe</dt><dd><span class="swatch" style="background:' + c + '"></span>' + esc(c.toUpperCase()) + '</dd><dt>Zählt nach</dt><dd>' + (u === 'km' ? 'Kilometern' : 'Betriebsstunden') + '</dd></dl>';
     hydrate($('#bikeBody'));
   }
-  if (!S.editing.tc) $('#tcBody').innerHTML = mountHTML(b);
+  if (!S.editing.tc) $('#tcBody').innerHTML = teile.cellsHTML(b, 'components', runtime);
+  teile.refresh(b);   /* ab 1.7.0: Teilehistorie, Vergleich */
   if (!S.editing.oil) {
     const fl = b.fluids || {};
     $('#oilBody').innerHTML = '<dl class="kv">' + FLUIDS.map(([k, l]) => { const f = fl[k] || {}; const val = [f.brand, f.spec, f.qty].filter(Boolean).join(' · '); return '<dt>' + l + '</dt><dd>' + (val ? esc(val) : '<span class="hint">–</span>') + '</dd>'; }).join('') + '</dl>';
@@ -1259,7 +1252,7 @@ function openEdit(key, src, msg){
       + '<fieldset><legend>Reifen vorn</legend><div class="grid"><div class="f full"><label for="tfM">Modell</label><input id="tfM" value="' + esc(tf.model || '') + '" placeholder="z. B. Michelin Starcross 6"></div><div class="f"><label for="tfA">Montiert bei (' + u + ')</label><input id="tfA" inputmode="decimal" value="' + esc(v2(tf.at)) + '"' + ph + '></div><div class="f"><label for="tfD">am</label><input type="date" id="tfD" value="' + esc(tf.date || '') + '" max="' + todayISO() + '"></div></div></fieldset>'
       + '<fieldset><legend>Reifen hinten</legend><div class="grid"><div class="f full"><label for="trM">Modell</label><input id="trM" value="' + esc(tr.model || '') + '"></div><div class="f"><label for="trA">Montiert bei (' + u + ')</label><input id="trA" inputmode="decimal" value="' + esc(v2(tr.at)) + '"' + ph + '></div><div class="f"><label for="trD">am</label><input type="date" id="trD" value="' + esc(tr.date || '') + '" max="' + todayISO() + '"></div></div></fieldset>'
       + '<fieldset><legend>Kette &amp; Übersetzung</legend><div class="grid"><div class="f"><label for="cF">Ritzel (Zähne)</label><input id="cF" inputmode="numeric" value="' + esc(c.front || '') + '"></div><div class="f"><label for="cR">Kettenrad (Zähne)</label><input id="cR" inputmode="numeric" value="' + esc(c.rear || '') + '"></div><div class="f"><label for="cB">Kette</label><input id="cB" value="' + esc(c.brand || '') + '" placeholder="z. B. DID 520 ERV3"></div><div class="f"><label for="cL">Glieder</label><input id="cL" inputmode="numeric" value="' + esc(c.links || '') + '"></div><div class="f"><label for="cA">Montiert bei (' + u + ')</label><input id="cA" inputmode="decimal" value="' + esc(v2(c.at)) + '"' + ph + '></div><div class="f"><label for="cD">am</label><input type="date" id="cD" value="' + esc(c.date || '') + '" max="' + todayISO() + '"></div></div></fieldset>'
-      + '<p class="hint">Wenn du ein neues Modell oder einen neuen Montage-Stand einträgst, landet der Wechsel automatisch im Logbuch.</p>'
+      + '<p class="hint">Wenn du ein neues Modell oder einen neuen Montage-Stand einträgst, landet der Wechsel automatisch im Logbuch. Ein neues Teil (anderes Modell oder anderes Montagedatum) bringt das bisherige in die Teilehistorie; Grund und Bewertung kannst du dort ergänzen. Zum Berichtigen das Teil antippen und „Angaben bearbeiten“ wählen.</p>'
       + '<div class="row"><button class="btn primary" type="submit">Speichern</button><button class="btn ghost" type="button" data-cancel="tc">Abbrechen</button></div></form>';
     if (warn) $('#tcForm').insertAdjacentHTML('afterbegin', warn);
   }
@@ -1475,7 +1468,24 @@ async function saveTC(b){
   }
   if (!o.payload) {
     const now = o.created, base = {bike: b.id, tasks: [], taskNames: [], extra: '', cost: null, note: '', atAuto: false};
-    const items = [{coll: 'bikes', id: b.id, patch: {tires: {front: nf, rear: nr}, chain: nc}, guard: editGuard('tc')}];
+    /* Ab 1.7.0 (Teilehistorie, Roadmap 6): Ein Wechsel bringt das bisherige Teil in den Verlauf (Ausbau = Montage des neuen),
+       eine Berichtigung nicht (mounts.isSwap). Angaben zum Teil (Hersteller, Einsatz, Bewertung …) bleiben beim Berichtigen
+       erhalten; ein neues Teil beginnt ohne sie. Der Lagerbestand bleibt unverändert. */
+    const raw = store.peek('bikes', b.id) || {}, hist = Array.isArray(raw.hist) ? clone(raw.hist) : [];
+    let moved = 0;
+    for (const [x, prev, slot, idf] of [[nf, tf, 'tf', y => y.model || y.maker], [nr, tr, 'tr', y => y.model || y.maker], [nc, c, 'chain', y => y.brand || y.maker]]) {
+      if (!str(idf(x))) continue;
+      if (mounts.isSwap(prev, x, idf)) { hist.push(mounts.histOfCurrent(prev, slot, mounts.pos(x.date, x.at, x.c), 'h' + uid())); moved++; }
+      else if (str(idf(prev))) Object.assign(x, mounts.detailsOf(prev));
+    }
+    /* Grenze der Teilehistorie: der ganze Wechsel wird abgelehnt, nichts gekürzt (Prüfung PR 9, R170-3) */
+    if (moved && hist.length > MAX_HIST) {
+      parkOp('tcForm');
+      throw new VErr($('#tfM'), 'Die Teilehistorie dieses Motorrads ist voll (höchstens ' + MAX_HIST + ' Einträge, für ' + (moved > 1 ? 'diese ' + moved + ' Wechsel' : 'diesen Wechsel') + ' fehlt Platz). Es wurde nichts gespeichert. Lösch zuerst ältere Einträge unter Verbaute Teile → Teilehistorie.');
+    }
+    const patch = {tires: {front: nf, rear: nr}, chain: nc}, guard = editGuard('tc');
+    if (moved) { patch.hist = hist; if (guard) guard.hist = clone(nu(raw.hist)); }
+    const items = [{coll: 'bikes', id: b.id, patch, guard}];
     if (fChanged) items.push({coll: 'log', id: 'tc' + uid(), data: canonDoc('log', Object.assign({}, base, {kind: 'tire', date: nf.date, at: nf.at, title: 'Reifen vorn: ' + nf.model, created: now}))});
     if (rChanged) items.push({coll: 'log', id: 'tc' + uid(), data: canonDoc('log', Object.assign({}, base, {kind: 'tire', date: nr.date, at: nr.at, title: 'Reifen hinten: ' + nr.model, created: now + 1}))});
     if (cChanged) items.push({coll: 'log', id: 'tc' + uid(), data: canonDoc('log', Object.assign({}, base, {kind: 'chain', date: nc.date, at: nc.at, title: 'Kette/Übersetzung: ' + [nc.front && nc.rear ? nc.front + '/' + nc.rear : '', nc.brand, nc.links ? nc.links + ' Glieder' : ''].filter(Boolean).join(', '), created: now + 2}))});
@@ -1645,6 +1655,7 @@ export function resetBikeForms(){
   resetLogState(); logMode(); S.editing = {}; S.editBase = {}; S.manMsg = null; S.manBase = null; S.oemDraft = null; S.editSetup = null; S.setupBase = null; S.checkDraft = null; setupMsg('');
   $('#setupFormTitle').textContent = 'Setup speichern'; $('#sSave').textContent = 'Setup speichern'; $('#sCancel').hidden = true;
   R.resetDefectForms();
+  teile.close(); S.mountOpen = null;   /* ab 1.7.0: Teilehistorie gehört zum Motorrad */
   ['hours', 'log', 'ride', 'setup', 'part', 'meter', 'defect'].forEach(k => drafts.mark(k));
   drafts.forget('manual');
   ['done', 'defDone', 'check', 'edit-bike', 'edit-tc', 'edit-oil', 'edit-int', 'edit-oem'].forEach(k => drafts.forget(k));
@@ -1813,6 +1824,7 @@ async function storeBikePhoto(file, forAdd, bid, epoch, res){
 export async function onClick(t){
   /* Ab 1.6.0: Beleg übernehmen */
   if (await beleg.onClick(t)) return true;
+  if (await teile.onClick(t)) return true;   /* ab 1.7.0: Teilehistorie */
   /* Anderen Artikel bearbeiten = neuer Vorgang: geänderte Eingaben erst klären (ab 1.3.1). Derselbe, schon offene Artikel:
      den Entwurf behalten und nur hinspringen. */
   if (t.dataset.partedit && $('#partForm').dataset.part === t.dataset.partedit && $('#partForm').closest('details').open) { $('#pName').focus(); $('#partForm').scrollIntoView({block: 'nearest'}); return true; }
@@ -2006,6 +2018,7 @@ export function onInput(t){
 
 export function onChange(t){
   if (beleg.onChange(t)) return true;   /* ab 1.6.0: Beleg übernehmen */
+  if (teile.onChange(t)) return true;   /* ab 1.7.0: Teilehistorie */
   /* Artikel aus einem Foto: offene Eingaben im Teileformular erst klären (Rückfrage), dann das Bild übernehmen */
   if (t.id === 'capCam' || t.id === 'capPick') { const file = t.files && t.files[0]; t.value = ''; if (file) drafts.begin(() => startCapture(file)); return true; }
   if (t.id === 'pImgFile') { const file = t.files && t.files[0]; t.value = ''; if (file) { stock.setImg(file); $('#pMore').open = true; partModeUi(); drafts.touch('part'); } return true; }
@@ -2053,6 +2066,7 @@ export function onChange(t){
 export async function onSubmit(f, busy){
   if (f.id === 'quickForm') return false;
   if (f.id === 'rcptForm') return beleg.submit(busy);   /* ab 1.6.0: Beleg übernehmen */
+  if (f.id === 'histForm') return teile.submit(busy);   /* ab 1.7.0: Teilehistorie */
   if (f.id === 'addBikeForm') { busy(true); await addBike(); return true; }
   if (f.id === 'manLinkForm') {
     /* Für das Motorrad, zu dem das Formular gehört (nicht ein inzwischen gewähltes anderes) */
@@ -2332,6 +2346,7 @@ function registerDrafts(){
   drafts.register({key: 'setup', label: 'Fahrwerk-Setup', root: () => $('#setupForm'), extra: () => S.editSetup || '', isOpen: () => $('#setupDetails').open, save: submitOf('setupForm'), discard: () => { parkOp('setupForm'); closeDraft('setupForm'); }, reveal: show('setup', 'setupDetails', 'setupDetails')});
   const partDet = () => { const f = $('#partForm'); return f ? f.closest('details') : null; };
   beleg.register(show('inventory', 'rcptForm'));   /* ab 1.6.0: Beleg übernehmen */
+  teile.register(show('components', 'histBox'));   /* ab 1.7.0: Teilehistorie */
   drafts.register({key: 'part', label: 'Teil', root: () => $('#partForm'), extra: () => ($('#partForm').dataset.part || '') + stock.sig(), save: submitOf('partForm'), discard: () => { parkOp('partForm'); closeDraft('partForm'); },
     isOpen: () => !!$('#partForm').dataset.part || !!S.cap || !!(partDet() && partDet().open), close: () => { parkOp('partForm'); closeDraft('partForm'); const d = partDet(); if (d) d.open = false; }, reveal: show('inventory', 'g-parts')});
   drafts.register({key: 'meter', label: 'Zählerwechsel', root: () => $('#meterForm'), save: submitOf('meterForm'), discard: () => { parkOp('meterForm'); closeDraft('meterForm'); },
