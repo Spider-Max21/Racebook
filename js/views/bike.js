@@ -462,8 +462,11 @@ function renderBanner(){
     if (chk.length) rows.push(checkPlan(b)
       ? '<div class="banner-row chk"><b>Wartungsstand prüfen</b><span>' + esc(chk.join(', ')) + '</span><button class="mini" type="button" data-chk="' + esc(b.id) + '">Prüfen</button></div>'
       : '<button class="banner-row warn" type="button" data-goto="status" data-anchor="c-items"><b>Wartungsstand prüfen</b><span>' + esc(chk.join(', ')) + ': Stand der letzten Wartung liegt über dem heutigen</span></button>');
-    if (due.length) rows.push('<button class="banner-row" type="button" data-goto="status" data-anchor="c-items"><b>Überfällig</b><span>' + esc(due.join(', ')) + '</span></button>');
-    if (soon.length) rows.push('<button class="banner-row warn" type="button" data-goto="status" data-anchor="c-items"><b>Bald fällig</b><span>' + esc(soon.join(', ')) + '</span></button>');
+    /* ab 1.7.2 (Issue #12): die Zusammenfassung „Überfällig“/„Bald fällig“ nur auf der Übersicht des Motorrads, nicht in jedem Bereich.
+       Zuordnungs- und Prüfhinweise (oben) und „Nachkaufen“ bleiben überall; die Wartungsstände selbst ändern sich nicht. */
+    const overview = (S.section || 'status') === 'status';
+    if (overview && due.length) rows.push('<button class="banner-row" type="button" data-goto="status" data-anchor="c-items"><b>Überfällig</b><span>' + esc(due.join(', ')) + '</span></button>');
+    if (overview && soon.length) rows.push('<button class="banner-row warn" type="button" data-goto="status" data-anchor="c-items"><b>Bald fällig</b><span>' + esc(soon.join(', ')) + '</span></button>');
   }
   const low = S.parts.filter(p => p.qty <= p.min && (!b || partFor(p, b.id)));
   if (low.length) rows.push('<button class="banner-row warn" type="button" data-goto="inventory" data-anchor="g-parts"><b>Nachkaufen</b><span>' + esc(low.map(p => p.name + ' (' + fmt(p.qty, 0) + ')').join(', ')) + '</span></button>');

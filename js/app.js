@@ -67,15 +67,18 @@ try { if (document.fonts) { document.fonts.ready.then(fitSoon); document.fonts.a
 function renderChrome(){
   const r = R.route, p = S.mode === 'error' ? 'error' : r.page;
   const b = curBike();
-  /* Zurück-Pfeil nur auf Daten, Hilfe und „Motorrad hinzufügen“. Auf der Motorrad-Seite führt stattdessen der
-     Knopf „Meine Garage“ über dem Inhalt zur Übersicht aller Motorräder (ab 1.1.0). */
+  /* Zurück-Pfeil nur auf Daten, Hilfe und „Motorrad hinzufügen“. Auf der Motorrad-Seite führt „Garage“ in der unteren Leiste
+     zur Übersicht aller Motorräder (ab 1.7.2, Issue #12; bis 1.7.1 zusätzlich der Knopf „Meine Garage“ über dem Inhalt). */
   $('#backBtn').hidden = p === 'home' || p === 'error' || p === 'bike';
   $('#backBtn').setAttribute('aria-label', 'Zurück');
   $('#homeLink').hidden = p !== 'home' && p !== 'error';
   const title = $('#barTitle');
-  const t = p === 'bike' && b ? bike.titleOf(b) : p === 'data' ? 'Einstellungen' : p === 'inventory' ? 'Lager' : p === 'navigation' ? 'Menü anpassen' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
+  /* ab 1.7.2 (Issue #12): auf der Motorrad-Seite oben der geöffnete Bereich, darunter das Motorrad als Kontext */
+  const sec = p === 'bike' && b ? (SECTION_LABEL[R.route.section] || SECTION_LABEL.status) : '';
+  const bikeCtx = p === 'bike' && b ? bike.titleOf(b) + (b.nickname ? ' · ' + ((b.brand || '') + ' ' + (b.model || '')).trim() : '') : '';
+  const t = p === 'bike' && b ? sec : p === 'data' ? 'Einstellungen' : p === 'inventory' ? 'Lager' : p === 'navigation' ? 'Menü anpassen' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
   title.hidden = !t;
-  title.innerHTML = t ? '<span class="bt-main">' + escHTML(t) + '</span>' + (p === 'bike' && b && b.nickname ? '<span class="bt-sub">' + escHTML((b.brand + ' ' + (b.model || '')).trim()) + '</span>' : '') : '';
+  title.innerHTML = t ? '<span class="bt-main">' + escHTML(t) + '</span>' + (bikeCtx ? '<span class="bt-sub">' + escHTML(bikeCtx) + '</span>' : '') : '';
   const chip = $('#backupChip');
   const has = (bikeList().length > 0 || S.parts.length > 0 || !!S.navigation) && S.mode === 'ready';
   chip.hidden = !has || p === 'data';
@@ -88,9 +91,10 @@ function renderChrome(){
   }
   if (p === 'bike') $$('.tab').forEach(x => x.setAttribute('aria-current', x.dataset.v === S.section ? 'page' : 'false'));
   nav.renderNavigation();
-  document.title = t ? t + ' – Racebook' : 'Racebook';
+  document.title = t ? t + (bikeCtx ? ' – ' + bike.titleOf(b) : '') + ' – Racebook' : 'Racebook';
   fitBars();
 }
+const SECTION_LABEL = Object.fromEntries(SECTIONS);
 const escHTML = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 
 function renderError(){
@@ -327,7 +331,6 @@ document.addEventListener('click', async e => {
   if (t.dataset.nav) { e.preventDefault(); go({page: t.dataset.nav}); return; }
   if (t.disabled) return;
   if (t.id === 'backBtn') { drafts.guard(() => { if (R.route.page === 'bike') toGarage(); else goBack(); }); return; }
-  if (t.id === 'garageBtn') { drafts.guard(() => toGarage()); return; }
   if (t.id === 'backupChip') { go({page: 'data'}); return; }
   if (t.id === 'reloadBtn') { location.reload(); return; }
   if (t.id === 'replacedOk') { S.replaced = null; renderSys(); return; }

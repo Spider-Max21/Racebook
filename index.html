@@ -38,7 +38,7 @@
 
   <!-- MOTORRAD -->
   <section id="v-bike" class="view" hidden aria-labelledby="barTitle">
-    <nav class="garage-nav-wrap" aria-label="Zurück zur Übersicht"><button class="garage-nav" id="garageBtn" type="button"><svg class="ic chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5L12 4l9 6.5"/><path d="M5 9.2V20h14V9.2"/><path d="M8 20v-7.5h8V20"/><path d="M8 15h8M8 17.5h8"/></svg><span>Meine Garage</span></button></nav>
+    <!-- ab 1.7.2 (Issue #12): kein eigener Knopf „Meine Garage“ mehr über dem Inhalt; Garage steht fest vorn in der unteren Leiste -->
     <div class="bike-context card"><label for="contextBike">Aktuelles Motorrad</label><select id="contextBike" data-nodirty></select><div class="bike-section-links" id="bikeSectionLinks" aria-label="Bereiche dieses Motorrads"></div></div>
     <div id="banner" class="banner" hidden></div>
 
@@ -393,7 +393,7 @@
   <section id="v-help" class="view" hidden aria-label="Hilfe">
     <div class="card help">
       <h2>So funktioniert Racebook</h2>
-      <p><b>Meine Garage:</b> Die Startseite zeigt alle Motorräder als Karten mit Stand, nächster Wartung und offenen Mängeln. Tipp auf eine Karte, um das Motorrad zu öffnen. Zurück zur Übersicht kommst du über den Knopf „Meine Garage“ oben auf der Motorrad-Seite.</p>
+      <p><b>Meine Garage:</b> Die Startseite zeigt alle Motorräder als Karten mit Stand, nächster Wartung und offenen Mängeln. Tipp auf eine Karte, um das Motorrad zu öffnen. Zurück zur Übersicht kommst du über „Garage“ ganz links in der unteren Leiste. Oben steht, welcher Bereich gerade offen ist, darunter das Motorrad.</p>
       <p><b>Stand eintragen:</b> Tipp unter Status auf das Nummernschild.</p>
       <p><b>Ungespeicherte Eingaben:</b> Wechselst du mit geänderten, noch nicht gespeicherten Eingaben zu einem anderen Motorrad, Bereich oder Formular, fragt Racebook nach: „Speichern“, „Verwerfen“ oder „Weiter bearbeiten“. Hat jemand dieselben Daten inzwischen in einem anderen Fenster geändert, speichert Racebook nicht einfach darüber, sondern zeigt den aktuellen Stand mit deinen Änderungen zum Prüfen.</p>
       <p><b>Tätigkeiten:</b> Im Logbuch wählst du, was du tatsächlich gemacht hast (häufige Arbeiten, Favoriten mit Stern, Suche im ganzen Katalog oder freie Eingabe). Getrennt davon stehen die betroffenen Wartungsintervalle. Racebook schlägt ein Intervall nur vor, wenn die Tätigkeiten es vollständig abdecken. „Öl gewechselt“ erledigt zum Beispiel nicht „Motoröl + Ölfilter“, solange der Filter nicht genannt ist. Unklares wie „Gabel gemacht“ musst du selbst auswählen.</p>

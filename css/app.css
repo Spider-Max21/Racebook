@@ -187,13 +187,6 @@ details.form-card[open]>summary{margin-bottom:12px}
 .note.quiet .ic{color:var(--muted)}
 
 /* ---------- Bereiche eines Motorrads ---------- */
-/* Eigener Navigationsknopf zur Übersicht, über dem Inhalt jedes Bereichs (die Leiste unten bleibt bei sieben Bereichen) */
-.garage-nav-wrap{display:flex}
-.garage-nav{display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:6px 16px 6px 8px;border:1.5px solid var(--ink);border-radius:999px;background:var(--surface);color:var(--ink);font:700 16px/1.1 var(--f-body);cursor:pointer;max-width:100%;white-space:nowrap}
-.garage-nav .ic{width:22px;height:22px;stroke-width:2}
-.garage-nav .chev{width:18px;height:18px;margin-right:-2px;stroke-width:2.4}
-.garage-nav:hover{background:var(--surface-2)}
-.garage-nav span{overflow:hidden;text-overflow:ellipsis}
 .banner{border:1px solid color-mix(in srgb,var(--bad) 45%,var(--line));background:color-mix(in srgb,var(--bad) 7%,var(--surface));border-radius:var(--r);padding:6px 12px;display:flex;flex-direction:column}
 .banner-row{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;background:none;border:0;padding:8px 0;min-height:44px;color:var(--ink);font:inherit;font-size:15px;text-align:left;cursor:pointer}
 .banner-row b{font:700 16px var(--f-cond);font-stretch:condensed;color:var(--bad)}
