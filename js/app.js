@@ -225,6 +225,7 @@ function applyRoute(r){
   renderAll();
   if (invTo && invTo !== invFrom) { window.scrollTo(0, 0); const h = document.getElementById('partDetailTitle'); if (h) h.focus({preventScroll: true}); }
   else if (invTo === '' && invFrom) { window.scrollTo(0, S.invScroll || 0); const c = document.querySelector('[data-partview="' + CSS.escape(invFrom) + '"]'); if (c) c.focus({preventScroll: true}); }
+  else if (r.anchor) { const a = document.getElementById(r.anchor); if (a) a.scrollIntoView({block: 'start'}); }   /* ab 1.9.1: alter Link „Technische Daten“ */
   else if (changed) window.scrollTo(0, 0);
 }
 function navigate(r, opts){

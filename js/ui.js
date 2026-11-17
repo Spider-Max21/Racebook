@@ -135,10 +135,12 @@ const P = {
 export const icon = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (P[n] || '') + '</svg>';
 
 /* ---------- Navigation ---------- */
-export const SECTIONS = [['status', 'Übersicht'], ['defects', 'Mängel'], ['log', 'Logbuch'], ['rides', 'Fahrten'], ['setup', 'Setup'], ['components', 'Verbaute Teile'], ['vehicle', 'Fahrzeugdaten'], ['specs', 'Technische Daten'], ['maintenance', 'Wartungsintervalle'], ['manual', 'Handbuch']];
+export const SECTIONS = [['status', 'Übersicht'], ['defects', 'Mängel'], ['log', 'Logbuch'], ['rides', 'Fahrten'], ['setup', 'Setup'], ['components', 'Verbaute Teile'], ['vehicle', 'Fahrzeugdaten'], ['maintenance', 'Wartungsintervalle'], ['manual', 'Handbuch']];
 export function parseRoute(h){
   h = String(h == null ? location.hash : h).replace(/^#/, '');
   const p = h.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch (e) { return ''; } });
+  /* ab 1.9.1 (Issue #17): „Technische Daten“ (specs) gehört zu den Fahrzeugdaten – alte Links führen dorthin, zu den technischen Angaben */
+  if (p[0] === 'bike' && p[1] && p[2] === 'specs') return {page: 'bike', bike: p[1], section: 'vehicle', anchor: 'g-oil'};
   if (p[0] === 'bike' && p[1]) return {page: 'bike', bike: p[1], section: p[2] === 'garage' ? 'vehicle' : SECTIONS.some(s => s[0] === p[2]) ? p[2] : 'status'};
   if (p[0] === 'lager') return p[1] ? {page: 'inventory', part: p[1]} : {page: 'inventory'};   /* ab 1.7.1: Artikeldetails */
   if (p[0] === 'menue') return {page: 'navigation'};

@@ -1161,6 +1161,20 @@ function placePartForm(){
   if (here && box.parentElement !== here) here.appendChild(box);
 }
 
+/* ab 1.9.1 (Issue #17): Zählerstand gut sichtbar, nur zum Ansehen – eingetragen wird wie bisher über die Übersicht (Schild) oder eine
+   Fahrt, gewechselt über „Zählerwechsel“. Nach einem Zählerwechsel getrennt: Anzeige des eingebauten Zählers und Gesamtlaufleistung
+   aller Zähler. Unbekannt bleibt unbekannt (nichts geschätzt). */
+function renderCount(b){
+  const el = $('#countBody'); if (!el) return;
+  const u = U(b), cur = curOf(b), tot = totOf(b), n = S.log.filter(l => l.bike === b.id && l.kind === 'meter').length;
+  const unit = u === 'km' ? 'km' : 'h', val = v => v == null ? 'unbekannt' : fmt(v) + ' ' + unit;
+  const cell = (lbl, v, id) => '<div class="count-cell" id="' + id + '"><span class="lbl">' + esc(lbl) + '</span><b>' + esc(val(v)) + '</b></div>';
+  el.innerHTML = '<div class="count-grid">' + cell(n ? 'Aktuelle Zähleranzeige' : (u === 'km' ? 'Kilometerstand' : 'Betriebsstunden'), cur, 'countCur')
+    + (n ? cell('Gesamtlaufleistung (alle Zähler)', tot, 'countTot') : '') + '</div>'
+    + '<p class="hint">' + (n ? (n === 1 ? 'Ein Zählerwechsel' : n + ' Zählerwechsel') + ' eingetragen: die Anzeige gehört zum eingebauten Zähler, die Gesamtlaufleistung zählt alle Zähler zusammen. ' : '')
+    + (cur == null ? 'Noch kein Stand eingetragen. ' : '') + 'Einen neuen Stand trägst du über „Stand eintragen“ oder mit einer Fahrt ein; Racebook schätzt nichts.</p>'
+    + '<div class="row"><button class="mini" type="button" id="countEdit">Stand eintragen</button></div>';
+}
 function renderGarage(){
   const b = curBike(); if (!b) return;
   const u = U(b);
@@ -1172,6 +1186,7 @@ function renderGarage(){
   if (!S.editing.tc) $('#tcBody').innerHTML = teile.cellsHTML(b, 'components', runtime);
   teile.refresh(b);   /* ab 1.7.0: Teilehistorie, Vergleich */
   zub.refresh(b);   /* ab 1.8.0: Zubehör */
+  renderCount(b);   /* ab 1.9.1 (Issue #17): Zählerstand auf der Fahrzeugseite */
   if (!S.editing.oil) {
     const fl = b.fluids || {};
     $('#oilBody').innerHTML = '<dl class="kv">' + FLUIDS.map(([k, l]) => { const f = fl[k] || {}; const val = [f.brand, f.spec, f.qty].filter(Boolean).join(' · '); return '<dt>' + l + '</dt><dd>' + (val ? esc(val) : '<span class="hint">–</span>') + '</dd>'; }).join('') + '</dl>';
@@ -1665,7 +1680,8 @@ async function addBike(){
 
 /* ---------- Bereich & Motorrad wechseln ---------- */
 export function setSection(v, anchor){
-  v = v === 'garage' ? ({'g-parts':'inventory','g-tc':'components','g-oil':'specs','g-int':'maintenance'}[anchor] || 'vehicle') : v;
+  v = v === 'garage' ? ({'g-parts':'inventory','g-tc':'components','g-int':'maintenance'}[anchor] || 'vehicle') : v;
+  if (v === 'specs') { v = 'vehicle'; anchor = anchor || 'g-oil'; }   /* ab 1.9.1 (Issue #17): Teil der Fahrzeugdaten */
   if (v === 'inventory') { R.navigate({page: 'inventory'}); if (anchor) requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView({block:'start'})); return; }
   S.section = v; lsSet('section', v);
   $$('#v-bike .sub').forEach(s => { s.hidden = s.id !== 'v-' + v; });
@@ -1932,6 +1948,7 @@ export async function onClick(t){
   if (t.id === 'oemAdd') { drafts.touch('edit-oem'); syncOemDraft(); S.oemDraft.rows.push({when: '', what: ''}); $('#oemBody').innerHTML = oemEditHTML(); return true; }
   if (t.dataset.oemrm != null) { drafts.touch('edit-oem'); syncOemDraft(); S.oemDraft.rows.splice(+t.dataset.oemrm, 1); $('#oemBody').innerHTML = oemEditHTML(); return true; }
   if (t.dataset.task) { const id = t.dataset.task; drafts.touch('log'); S.logTasks.has(id) ? S.logTasks.delete(id) : S.logTasks.add(id); S.logIvMan[id] = S.logTasks.has(id); S.logIvAuto.delete(id); t.setAttribute('aria-pressed', S.logTasks.has(id)); dropEditPrev(); return true; }
+  if (t.id === 'countEdit') { R.guard(() => { setSection('status', 'plateBtn'); const pb = $('#plateBtn'); if (pb) pb.click(); }); return true; }   /* ab 1.9.1: dasselbe Formular wie das Schild */
   if (t.id === 'plateBtn') {
     const b = curBike(); if (!b) return true;
     const f = $('#hoursForm');
@@ -2415,7 +2432,7 @@ function registerDrafts(){
     isOpen: () => !!($('#g-meter') && $('#g-meter').open), close: () => { parkOp('meterForm'); closeDraft('meterForm'); $('#g-meter').open = false; }, reveal: show('vehicle', 'g-meter', 'g-meter')});
   [['bike', 'Motorrad bearbeiten', 'bikeForm', 'g-bike'], ['tc', 'Reifen & Kette', 'tcForm', 'g-tc'], ['oil', 'Öle & Flüssigkeiten', 'oilForm', 'g-oil'], ['int', 'Wartungsintervalle', 'intForm', 'g-int'], ['oem', 'Herstellervorgaben', 'oemForm', 'oemBody']].forEach(([k, label, id, anchor]) => {
     drafts.register({key: 'edit-' + k, label, root: () => S.editing[k] ? $('#' + id) : null, extra: () => k === 'oem' && S.oemDraft ? S.oemDraft.rows.length : null, isOpen: () => !!S.editing[k],
-      save: async () => { const f = $('#' + id); if (!f) return true; await R.submitForm(f); return !S.editing[k]; }, discard: () => closeEdit(k), reveal: show(({oem:'manual',bike:'vehicle',tc:'components',oil:'specs',int:'maintenance'})[k], anchor)});
+      save: async () => { const f = $('#' + id); if (!f) return true; await R.submitForm(f); return !S.editing[k]; }, discard: () => closeEdit(k), reveal: show(({oem:'manual',bike:'vehicle',tc:'components',oil:'vehicle',int:'maintenance'})[k], anchor)});
   });
   drafts.register({key: 'add', label: 'Motorrad hinzufügen', root: () => $('#addBikeForm'), extra: () => S.addPhoto ? S.addPhoto.photo.id : '', save: submitOf('addBikeForm'), discard: () => closeDraft('addBikeForm')});
   drafts.register({key: 'check', label: 'Checkliste anpassen', root: () => $('#checkForm'), extra: () => S.checkDraft ? S.checkDraft.items : null, isOpen: () => !!S.checkDraft, save: () => saveCheckEdit(), discard: () => closeCheckEdit(), reveal: show('status', 'c-check')});

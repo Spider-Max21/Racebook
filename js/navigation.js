@@ -9,7 +9,7 @@ import {esc, canon} from './util.js';
 import {R} from './registry.js';
 
 const LABELS = {home:'Garage',inventory:'Lager',data:'Einstellungen',help:'Hilfe',navigation:'Menü anpassen',...Object.fromEntries(SECTIONS)};
-const SHORT = {components:'Verbaut',vehicle:'Fahrzeug',specs:'Daten',maintenance:'Intervalle'};
+const SHORT = {components:'Verbaut',vehicle:'Fahrzeug',maintenance:'Intervalle'};
 const titleOf = b => b.nickname || ((b.brand || '') + ' ' + (b.model || '')).trim() || 'Motorrad';
 let draft = null, target = '', dragging = null;
 const clone = x => x == null ? null : JSON.parse(JSON.stringify(x));

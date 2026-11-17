@@ -262,9 +262,14 @@
       <div id="setupList" class="stack"></div>
     </section>
 
+    <!-- ab 1.9.1 (Issue #17): eine Fahrzeugseite – Zählerstand, Stammdaten, Zählerwechsel und technische Angaben (früher eigener Bereich „Technische Daten“) -->
     <section id="v-vehicle" class="sub" hidden><h2 class="section-title">Fahrzeugdaten</h2>
+      <div class="card" id="g-count">
+        <div class="card-h"><h2>Zählerstand</h2></div>
+        <div id="countBody"></div>
+      </div>
       <div class="card" id="g-bike">
-        <div class="card-h"><h2>Motorrad</h2><button class="link" type="button" data-edit="bike">Bearbeiten</button></div>
+        <div class="card-h"><h2>Stammdaten</h2><button class="link" type="button" data-edit="bike">Bearbeiten</button></div>
         <div id="bikeBody"></div>
       </div>
       <details class="card form-card meter-card" id="g-meter">
@@ -281,6 +286,11 @@
           </form>
         </div>
       </details>
+      <h3 class="group-h" id="techHead">Technische Angaben</h3>
+      <div class="card" id="g-oil">
+        <div class="card-h"><h2>Öle &amp; Flüssigkeiten</h2><button class="link" type="button" data-edit="oil">Bearbeiten</button></div>
+        <div id="oilBody"></div>
+      </div>
     </section>
 
     <section id="v-components" class="sub" hidden><h2 class="section-title">Verbaute Teile</h2>
@@ -307,13 +317,6 @@
         <div class="row" style="margin-top:8px"><button class="mini" type="button" id="accAdd">Zubehör eintragen</button></div>
         <div id="accBox"></div>
         <div id="accList"></div>
-      </div>
-    </section>
-
-    <section id="v-specs" class="sub" hidden><h2 class="section-title">Technische Daten</h2>
-      <div class="card" id="g-oil">
-        <div class="card-h"><h2>Öle &amp; Flüssigkeiten</h2><button class="link" type="button" data-edit="oil">Bearbeiten</button></div>
-        <div id="oilBody"></div>
       </div>
     </section>
 
