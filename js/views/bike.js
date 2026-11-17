@@ -16,6 +16,7 @@ import * as beleg from './beleg.js';
 import * as artikel from './artikel.js';
 import * as mounts from '../mounts.js';
 import * as teile from './teilehistorie.js';
+import * as zub from './zubehoer.js';
 import * as ocr from '../ocr.js';
 import {parseLabel} from '../label.js';
 import {openCropper} from '../cropper.js';
@@ -286,6 +287,7 @@ export function closeDraft(k){
   /* Ab 1.6.0: Beleg übernommen (auch wenn ein unklarer Versuch nachträglich als gespeichert erkannt wird) */
   else if (k === 'rcptForm') beleg.close();
   else if (k === 'histForm') teile.close();   /* ab 1.7.0: Teilehistorie */
+  else if (k === 'accForm') zub.close();   /* ab 1.8.0: Zubehör */
   else if (k === 'partForm') { const wasEdit = !!$('#partForm').dataset.part; if (wasEdit) { const d = $('#partFormBox'); if (d) d.open = false; }   /* ab 1.7.1: Bearbeiten/Auffüllen beendet → Formular zu */
     stock.dropCap(); stock.dropImg(); S.fill = null; $('#pName').value = ''; $('#pQty').value = '1'; $('#pMin').value = '1'; stock.fillExtra(null); stock.fillPrice(null); stock.clearMarks(); partEditMode(null); renderPartBike(); stock.renderBikePick([]); }
   else if (k === 'addBikeForm') { S.adding = false; dropAddPhoto(); const el = $('#addBike'); if (el) el.innerHTML = ''; }
@@ -1167,6 +1169,7 @@ function renderGarage(){
   }
   if (!S.editing.tc) $('#tcBody').innerHTML = teile.cellsHTML(b, 'components', runtime);
   teile.refresh(b);   /* ab 1.7.0: Teilehistorie, Vergleich */
+  zub.refresh(b);   /* ab 1.8.0: Zubehör */
   if (!S.editing.oil) {
     const fl = b.fluids || {};
     $('#oilBody').innerHTML = '<dl class="kv">' + FLUIDS.map(([k, l]) => { const f = fl[k] || {}; const val = [f.brand, f.spec, f.qty].filter(Boolean).join(' · '); return '<dt>' + l + '</dt><dd>' + (val ? esc(val) : '<span class="hint">–</span>') + '</dd>'; }).join('') + '</dl>';
@@ -1688,6 +1691,7 @@ export function resetBikeForms(){
   $('#setupFormTitle').textContent = 'Setup speichern'; $('#sSave').textContent = 'Setup speichern'; $('#sCancel').hidden = true;
   R.resetDefectForms();
   teile.close(); S.mountOpen = null;   /* ab 1.7.0: Teilehistorie gehört zum Motorrad */
+  zub.close();   /* ab 1.8.0: Zubehör gehört zum Motorrad */
   ['hours', 'log', 'ride', 'setup', 'part', 'meter', 'defect'].forEach(k => drafts.mark(k));
   drafts.forget('manual');
   ['done', 'defDone', 'check', 'edit-bike', 'edit-tc', 'edit-oil', 'edit-int', 'edit-oem'].forEach(k => drafts.forget(k));
@@ -1857,6 +1861,7 @@ export async function onClick(t){
   /* Ab 1.6.0: Beleg übernehmen */
   if (await beleg.onClick(t)) return true;
   if (await teile.onClick(t)) return true;   /* ab 1.7.0: Teilehistorie */
+  if (await zub.onClick(t)) return true;   /* ab 1.8.0: Zubehör */
   /* ab 1.7.1: Artikeldetails öffnen bzw. zurück zur Liste (Suche, Filter, Scrollposition bleiben). Anschauen beginnt keinen
      Entwurf; ein offener Bearbeiten-Entwurf schützt die bekannte Rückfrage beim Zurück. */
   if (t.dataset.partview) { R.navigate({page: 'inventory', part: t.dataset.partview}); return true; }
@@ -2107,6 +2112,7 @@ export async function onSubmit(f, busy){
   if (f.id === 'quickForm') return false;
   if (f.id === 'rcptForm') return beleg.submit(busy);   /* ab 1.6.0: Beleg übernehmen */
   if (f.id === 'histForm') return teile.submit(busy);   /* ab 1.7.0: Teilehistorie */
+  if (f.id === 'accForm') return zub.submit(busy);   /* ab 1.8.0: Zubehör */
   if (f.id === 'addBikeForm') { busy(true); await addBike(); return true; }
   if (f.id === 'manLinkForm') {
     /* Für das Motorrad, zu dem das Formular gehört (nicht ein inzwischen gewähltes anderes) */
@@ -2387,6 +2393,7 @@ function registerDrafts(){
   const partDet = () => { const f = $('#partForm'); return f ? f.closest('details') : null; };
   beleg.register(show('inventory', 'rcptForm'));   /* ab 1.6.0: Beleg übernehmen */
   teile.register(show('components', 'histBox'));   /* ab 1.7.0: Teilehistorie */
+  zub.register(show('components', 'accBox'));   /* ab 1.8.0: Zubehör */
   drafts.register({key: 'part', label: 'Teil', root: () => $('#partForm'), extra: () => ($('#partForm').dataset.part || '') + stock.sig(), save: submitOf('partForm'), discard: () => { parkOp('partForm'); closeDraft('partForm'); },
     isOpen: () => !!$('#partForm').dataset.part || !!S.cap || !!(partDet() && partDet().open), close: () => { parkOp('partForm'); closeDraft('partForm'); const d = partDet(); if (d) d.open = false; },
     /* ab 1.7.1: ein Bearbeiten-Entwurf aus den Artikeldetails wird dort wieder gezeigt */

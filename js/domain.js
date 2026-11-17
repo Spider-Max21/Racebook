@@ -55,8 +55,12 @@ export const ZIP_FORMAT = 'racebook-backup';
    eine Bestandseinheit, einen Einkaufspreis oder Einkäufe hat (unit, price, buys). 1.4.x lehnt Version 11 ab.
    Ab 1.6.0 Version 12, wenn ein Einkauf aus einem Rechnungsfoto stammt (Beleg doc, Prüfsumme docHash, Händler vendor).
    1.5.x würde Beleg und Händler beim Einlesen still verwerfen; deshalb lehnt es Version 12 ab.
-   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10 bzw. 11. */
-export const ZIP_VERSION = 13;
+   Ab 1.7.0 Version 13, wenn ein Motorrad Teilehistorie oder Angaben zu montierten Reifen/Kette hat; 1.6.x lehnt Version 13 ab.
+   Ab 1.8.0 Version 14, wenn ein Motorrad Zubehör hat (acc, Issue #15). 1.7.x kennt es nicht und würde es beim Einlesen still
+   verwerfen; deshalb lehnt es Version 14 ab.
+   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10, 11, 12 bzw. 13. */
+export const ZIP_VERSION = 14;
+export const ZIP_VERSION_V13 = 13;
 export const ZIP_VERSION_V12 = 12;
 export const ZIP_VERSION_V11 = 11;
 export const ZIP_VERSION_V10 = 10;
@@ -93,6 +97,9 @@ export const needsV12 = next => Object.values((next && next.parts) || {}).some(h
 export const hasV13Bike = b => !!b && typeof b === 'object' && ((Array.isArray(b.hist) && b.hist.length > 0)
   || [b.tires && b.tires.front, b.tires && b.tires.rear, b.chain].some(x => !!x && typeof x === 'object' && PART_DETAIL_KEYS.some(k => x[k] != null && x[k] !== '')));
 export const needsV13 = next => Object.values((next && next.bikes) || {}).some(hasV13Bike);
+/* ab 1.8.0 (Issue #15): Zubehör am Motorrad (acc) */
+export const hasV14Bike = b => !!b && typeof b === 'object' && Array.isArray(b.acc) && b.acc.length > 0;
+export const needsV14 = next => Object.values((next && next.bikes) || {}).some(hasV14Bike);
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
 const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && d.bike !== 'some' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
@@ -256,6 +263,7 @@ export function cleanBike(x, strict, where){
     chain: withC(Object.assign({front: h.n(chain.front, 'Ritzel', {int:true, min:5, max:99}), rear: h.n(chain.rear, 'Kettenrad', {int:true, min:5, max:99}), brand: h.s(chain.brand, 'Kette', {max:120}), links: h.n(chain.links, 'Kettenglieder', {int:true, min:40, max:250}), at: h.n(chain.at, 'Kette Stand', {min:0, max:1e7}), date: h.d(chain.date, 'Kette Datum') || ''}, cleanPartDetails(chain, h, 'Kette')), chain.c, 'Kette'),
     ...cleanBikeV8(x, h),
     ...(x.hist != null ? {hist: cleanHist(x.hist, h)} : {}),
+    ...(x.acc != null ? {acc: cleanAcc(x.acc, h)} : {}),
     oem: {rows: h.a(oem.rows, 'Herstellervorgaben').filter(r => r && typeof r === 'object').slice(0, 50).map(r => ({when: h.s(r.when, 'Herstellervorgabe', {max:60}), what: h.s(r.what, 'Herstellervorgabe', {max:300})})), note: h.s(oem.note, 'Hinweis', {max:2000}), sourceTitle: h.s(oem.sourceTitle, 'Quelle', {max:200}), sourceUrl: safeUrl(oem.sourceUrl)},
     manual
   };
@@ -308,6 +316,30 @@ function cleanPos(p, h, f){
   const c = h.n(p.c, f + ' Erfassungszeit', {int: true, min: 0});
   if (c != null && o.at != null && o.date) o.c = c;
   return o;
+}
+/* ---------- Zubehör (ab 1.8.0, Issue #15) ----------
+   acc am Motorrad – nur wenn benutzt, bestehende Motorräder bleiben exakt gleich: [{id, name, maker, model, note}], nur name ist
+   Pflicht. Ein Eintrag dokumentiert verbautes Zubehör (z. B. Motorschutz, Handguards): keine Montage- oder Zählerstände, keine
+   Nutzung, kein Verschleiß, keine Lagerbuchung, keine Kosten, keine Wartung. Reifen, Kette und weitere Teile bleiben in tires/chain/hist. */
+export const MAX_ACC = 100;
+export const ACC_MAX = {name: 60, maker: 60, model: 120, note: 300};
+export function cleanAcc(v, h){
+  const arr = h.a(v, 'Zubehör');
+  if (arr.length > MAX_ACC) h.fail('Zubehör', 'hat mehr als ' + MAX_ACC + ' Einträge.');
+  const seen = new Set();
+  return arr.slice(0, MAX_ACC).map((r, i) => {
+    const w = 'Zubehör ' + (i + 1);
+    if (!r || typeof r !== 'object' || Array.isArray(r)) { h.fail(w, 'ist ungültig.'); return null; }
+    const id = h.id(r.id, w + ' (ID)'); if (!id) return null;
+    if (seen.has(id)) { h.fail(w, 'kommt doppelt vor.'); return null; }
+    const name = h.s(r.name, w + ' (Bezeichnung)', {req: true, max: ACC_MAX.name});
+    if (!name) return null;
+    seen.add(id);
+    const o = {id, name};
+    const s = (k, l) => { const x = h.s(r[k], w + ' (' + l + ')', {max: ACC_MAX[k]}); if (x) o[k] = x; };
+    s('maker', 'Hersteller'); s('model', 'Modell'); s('note', 'Notiz');
+    return o;
+  }).filter(Boolean);
 }
 export function cleanHist(v, h){
   const arr = h.a(v, 'Teilehistorie');
@@ -1118,6 +1150,7 @@ export function validateZipJson(d){
   if (d.version < 8 && (logs.some(hasV8Log) || (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV8Bike))) throw new Error('Die Sicherung ist beschädigt (Tätigkeiten, Checkliste oder Favoriten in einer Sicherung vor Version 8).');
   if (d.version < 9 && d.navigation != null) throw new Error('Menübelegung in einer Sicherung vor Version 9.');
   if (d.version < 13 && (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV13Bike)) throw new Error('Die Sicherung ist beschädigt (Teilehistorie oder Angaben zu Reifen und Kette in einer Sicherung vor Version 13).');
+  if (d.version < 14 && (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV14Bike)) throw new Error('Die Sicherung ist beschädigt (Zubehör in einer Sicherung vor Version 14).');
   const teile = [].concat(Array.isArray(d.teile) ? d.teile : [], d.verwaist && Array.isArray(d.verwaist.teile) ? d.verwaist.teile : []);
   if (d.version < 10 && teile.some(hasV10Part)) throw new Error('Die Sicherung ist beschädigt (Artikelangaben oder Artikelbilder in einer Sicherung vor Version 10).');
   if (d.version < 11 && teile.some(hasV11Part)) throw new Error('Die Sicherung ist beschädigt (Mehrfachzuordnung oder Einkaufspreise in einer Sicherung vor Version 11).');

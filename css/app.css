@@ -299,7 +299,10 @@ button.mount-cell:hover{border-color:var(--line)}
 button.mount-cell[aria-expanded="true"]{border-color:var(--accent,var(--line));box-shadow:inset 0 0 0 1px var(--accent,var(--line))}
 .mount-info{margin-top:10px;border:1px solid var(--line);border-radius:var(--r-s);padding:10px 12px}
 .mount-info h3,.hist-form h3{margin:0;font-size:16px}
-.mount-info .row,.hist-row .row{margin-top:8px}
+.mount-info .row,.hist-row .row,.acc-row .row{margin-top:8px}
+/* ab 1.8.0 (Issue #15): Zubehör */
+.acc-list{list-style:none;margin:8px 0 0;padding:0}
+.acc-row{border-top:1px solid var(--line);padding:10px 0;overflow-wrap:anywhere}
 .sub-h{font-size:15px;margin:14px 0 6px}
 .hist-row,.cmp-group{border-top:1px solid var(--line);padding:10px 0;overflow-wrap:anywhere}
 .hist-h{display:flex;gap:8px;align-items:baseline;justify-content:space-between;flex-wrap:wrap}

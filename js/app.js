@@ -169,6 +169,7 @@ function onDatasetChange(phase){
     bike.closeDraft('partForm');
     bike.closeDraft('rcptForm');   /* ab 1.6.0: offener Beleg (samt laufender Erkennung) gehört zum alten Bestand */
     bike.closeDraft('histForm');   /* ab 1.7.0: Teilehistorie gehört zum alten Bestand */
+    bike.closeDraft('accForm');   /* ab 1.8.0: Zubehör gehört zum alten Bestand */
     if (S.adding || S.addPhoto) bike.closeDraft('addBikeForm');
     S.shareReady = null; S.oemDraft = null; S.editing = {};
     nav.resetEditor();
