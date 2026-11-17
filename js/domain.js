@@ -58,8 +58,11 @@ export const ZIP_FORMAT = 'racebook-backup';
    Ab 1.7.0 Version 13, wenn ein Motorrad Teilehistorie oder Angaben zu montierten Reifen/Kette hat; 1.6.x lehnt Version 13 ab.
    Ab 1.8.0 Version 14, wenn ein Motorrad Zubehör hat (acc, Issue #15). 1.7.x kennt es nicht und würde es beim Einlesen still
    verwerfen; deshalb lehnt es Version 14 ab.
-   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10, 11, 12 bzw. 13. */
-export const ZIP_VERSION = 14;
+   Ab 1.9.0 Version 15, wenn ein Setup Reifenangaben je Rad oder einen Untergrund hat (tyres, surface, Issue #16). 1.8.x würde sie
+   beim Einlesen still verwerfen; deshalb lehnt es Version 15 ab.
+   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 bzw. 14. */
+export const ZIP_VERSION = 15;
+export const ZIP_VERSION_V14 = 14;
 export const ZIP_VERSION_V13 = 13;
 export const ZIP_VERSION_V12 = 12;
 export const ZIP_VERSION_V11 = 11;
@@ -100,6 +103,9 @@ export const needsV13 = next => Object.values((next && next.bikes) || {}).some(h
 /* ab 1.8.0 (Issue #15): Zubehör am Motorrad (acc) */
 export const hasV14Bike = b => !!b && typeof b === 'object' && Array.isArray(b.acc) && b.acc.length > 0;
 export const needsV14 = next => Object.values((next && next.bikes) || {}).some(hasV14Bike);
+/* ab 1.9.0 (Issue #16): Reifenangaben je Rad oder Untergrund im Setup */
+export const hasV15Setup = s => !!s && typeof s === 'object' && ((s.tyres != null && typeof s.tyres === 'object') || (s.surface != null && typeof s.surface === 'object'));
+export const needsV15 = next => Object.values((next && next.setups) || {}).some(hasV15Setup);
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
 const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && d.bike !== 'some' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
@@ -365,6 +371,47 @@ export function cleanHist(v, h){
     return o;
   }).filter(Boolean);
 }
+/* ---------- Reifen und Untergrund im Setup (ab 1.9.0, Issue #16) ----------
+   tyres = {front, rear}, je Rad nur erfasste Angaben: maker, model (frei), comp (Mischung bzw. Einsatz, siehe TYRE_COMPS; 'x' mit
+   compX = eigene Angabe), sys (System, siehe TYRE_SYSTEMS; 'x' mit sysX = andere Angabe). Sand ist eine Einsatz-/Profilbezeichnung,
+   keine Gummihärte; Bezeichnungen gelten nicht herstellerübergreifend gleich. Tubeless und Tubliss sind verschiedene Systeme.
+   surface = {sel: [SURFACES], x: eigene Angabe}; mehrere = gemischter Untergrund, nichts = unbekannt. Das Setup speichert eine
+   eigene Kopie: ein späterer Reifenwechsel am Motorrad ändert es nicht. Keine Empfehlungen, kein Reifenwechsel, kein Lager. */
+export const TYRE_COMPS = [['ss', 'Super Soft'], ['s', 'Soft'], ['m', 'Medium'], ['h', 'Hart'], ['sand', 'Sand']];
+export const TYRE_COMP_HARD = ['ss', 's', 'm', 'h'];   /* Gummimischungen; 'sand' ist Einsatz/Profil */
+export const TYRE_SYSTEMS = [['tube', 'Schlauch'], ['mousse', 'Mousse'], ['tubeless', 'Tubeless'], ['tubliss', 'Tubliss']];
+export const SURFACES = [['sand', 'Sand'], ['erde', 'Erde/Lehm'], ['hart', 'Hartboden'], ['stein', 'Stein/Fels']];
+export const TYRE_MAX = {maker: 60, model: 120, compX: 40, sysX: 40, surfaceX: 60};
+function cleanWheel(t, h, f){
+  if (t == null) return null;
+  t = h.o(t, f); const o = {};
+  const s = (k, l, max) => { const v = h.s(t[k], f + ' ' + l, {max}); if (v) o[k] = v; };
+  s('maker', 'Hersteller', TYRE_MAX.maker); s('model', 'Modell', TYRE_MAX.model);
+  if (t.comp != null && t.comp !== '') { const v = h.one(t.comp, f + ' Mischung', TYRE_COMPS.map(x => x[0]).concat(['x']), ''); if (v) o.comp = v; }
+  if (o.comp === 'x') { const v = h.s(t.compX, f + ' Mischung (eigene Angabe)', {max: TYRE_MAX.compX}); if (v) o.compX = v; else delete o.comp; }
+  if (t.sys != null && t.sys !== '') { const v = h.one(t.sys, f + ' System', TYRE_SYSTEMS.map(x => x[0]).concat(['x']), ''); if (v) o.sys = v; }
+  if (o.sys === 'x') { const v = h.s(t.sysX, f + ' System (andere Angabe)', {max: TYRE_MAX.sysX}); if (v) o.sysX = v; else delete o.sys; }
+  return Object.keys(o).length ? o : null;
+}
+export function cleanSetupTyres(v, h){
+  if (v == null) return null;
+  v = h.o(v, 'Reifen im Setup');
+  const front = cleanWheel(v.front, h, 'Reifen vorn'), rear = cleanWheel(v.rear, h, 'Reifen hinten');
+  if (!front && !rear) return null;
+  const o = {}; if (front) o.front = front; if (rear) o.rear = rear;
+  return o;
+}
+export function cleanSurface(v, h){
+  if (v == null) return null;
+  v = h.o(v, 'Untergrund');
+  const keys = SURFACES.map(x => x[0]);
+  const sel = h.a(v.sel, 'Untergrund (Auswahl)').filter(k => { if (keys.includes(k)) return true; h.fail('Untergrund', '„' + String(k).slice(0, 20) + '“ ist unbekannt.'); return false; });
+  const uniq = keys.filter(k => sel.includes(k));
+  const x = h.s(v.x, 'Untergrund (eigene Angabe)', {max: TYRE_MAX.surfaceX});
+  if (!uniq.length && !x) return null;
+  const o = {}; if (uniq.length) o.sel = uniq; if (x) o.x = x;
+  return o;
+}
 export function cleanSnap(x, h){
   if (x == null) return null;
   x = h.o(x, 'Setup-Kopie'); const o = {track: h.s(x.track, 'Setup-Kopie Strecke', {max:120}), updated: h.d(x.updated, 'Setup-Kopie Datum')};
@@ -411,7 +458,11 @@ export function cleanDoc(coll, x, strict, where){
     amount: h.n(x.amount, 'Fahrzeit', {gt:0, max:LIM.km.ride}), ground: h.s(x.ground, 'Boden', {max:40}), weather: h.s(x.weather, 'Wetter', {max:40}),
     setupId: h.id(x.setupId, 'Setup', {opt:true}), setupSnap: cleanSnap(x.setupSnap, h), feel: h.n(x.feel, 'Gefühl', {int:true, min:1, max:5}), inReading: x.inReading === true,
     note: h.s(x.note, 'Notiz', {max:4000}), created: h.n(x.created, 'Zeitstempel', {int:true, min:0}) || 0};
-  if (coll === 'setups') { const o = {bike, track: h.s(x.track, 'Strecke', {req:true, max:120}), note: h.s(x.note, 'Notiz', {max:2000}), updated: h.d(x.updated, 'Datum')}; SF.forEach(([, k, l, r]) => { o[k] = h.n(x[k], l, {int:r.int, min:r.min, max:r.max}); }); return o; }
+  if (coll === 'setups') { const o = {bike, track: h.s(x.track, 'Strecke', {req:true, max:120}), note: h.s(x.note, 'Notiz', {max:2000}), updated: h.d(x.updated, 'Datum')}; SF.forEach(([, k, l, r]) => { o[k] = h.n(x[k], l, {int:r.int, min:r.min, max:r.max}); });
+    /* ab 1.9.0 (Issue #16): nur wenn erfasst – bestehende Setups bleiben exakt gleich */
+    const ty = cleanSetupTyres(x.tyres, h); if (ty) o.tyres = ty;
+    const su = cleanSurface(x.surface, h); if (su) o.surface = su;
+    return o; }
   if (coll === 'defects') return {bike, title: h.s(x.title, 'Titel', {req:true, max:120}), description: h.s(x.description, 'Beschreibung', {max:4000}),
     date: h.d(x.date, 'Datum', {req:true}) || '', priority: h.one(x.priority, 'Priorität', DEFECT_PRIOS.map(p => p[0]), 'mid'),
     status: h.one(x.status, 'Status', DEFECT_STATES.map(p => p[0]), 'open'),
@@ -1151,6 +1202,7 @@ export function validateZipJson(d){
   if (d.version < 9 && d.navigation != null) throw new Error('Menübelegung in einer Sicherung vor Version 9.');
   if (d.version < 13 && (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV13Bike)) throw new Error('Die Sicherung ist beschädigt (Teilehistorie oder Angaben zu Reifen und Kette in einer Sicherung vor Version 13).');
   if (d.version < 14 && (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV14Bike)) throw new Error('Die Sicherung ist beschädigt (Zubehör in einer Sicherung vor Version 14).');
+  if (d.version < 15 && [].concat(Array.isArray(d.fahrwerk) ? d.fahrwerk : [], d.verwaist && Array.isArray(d.verwaist.fahrwerk) ? d.verwaist.fahrwerk : []).some(hasV15Setup)) throw new Error('Die Sicherung ist beschädigt (Reifenangaben oder Untergrund im Setup in einer Sicherung vor Version 15).');
   const teile = [].concat(Array.isArray(d.teile) ? d.teile : [], d.verwaist && Array.isArray(d.verwaist.teile) ? d.verwaist.teile : []);
   if (d.version < 10 && teile.some(hasV10Part)) throw new Error('Die Sicherung ist beschädigt (Artikelangaben oder Artikelbilder in einer Sicherung vor Version 10).');
   if (d.version < 11 && teile.some(hasV11Part)) throw new Error('Die Sicherung ist beschädigt (Mehrfachzuordnung oder Einkaufspreise in einer Sicherung vor Version 11).');

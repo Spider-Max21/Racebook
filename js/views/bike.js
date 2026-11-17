@@ -17,6 +17,7 @@ import * as artikel from './artikel.js';
 import * as mounts from '../mounts.js';
 import * as teile from './teilehistorie.js';
 import * as zub from './zubehoer.js';
+import * as TY from './setup_reifen.js';
 import * as ocr from '../ocr.js';
 import {parseLabel} from '../label.js';
 import {openCropper} from '../cropper.js';
@@ -1095,6 +1096,7 @@ function renderSetups(){
       + '<div class="clicks"><span class="grp">Gabel</span>' + cell(s.forkC, 'Druck') + cell(s.forkR, 'Zug') + cell(s.forkAir, 'Luft bar') + cell(s.forkPre, 'Vorsp.', true) + '</div>'
       + '<div class="clicks"><span class="grp">Federbein</span>' + cell(s.shockHSC, 'HSC Umdr.', true) + cell(s.shockLSC, 'LSC') + cell(s.shockR, 'Zug') + '<div class="cell empty"></div></div>'
       + (extra ? '<p class="hint">' + esc(extra) + '</p>' : '')
+      + TY.cardHTML(s)   /* ab 1.9.0: Reifen je Rad, Untergrund */
       + (s.note ? '<div class="entry-note">' + esc(s.note) + '</div>' : '')
       + '<div class="row"><button class="mini" type="button" data-editsetup="' + esc(s.id) + '">Bearbeiten</button><button class="mini" type="button" data-copysetup="' + esc(s.id) + '">Als Vorlage</button><button class="mini" type="button" data-del="setups/' + esc(s.id) + '" data-arm="Löschen?">Löschen</button></div></div>';
   }).join('') : '<div class="card"><p class="hint">Noch kein Setup gespeichert. Leg oben für jede Strecke deine Klicks, den Sag und den Reifendruck ab.</p></div>';
@@ -1683,6 +1685,7 @@ export function resetBikeForms(){
   BIKE_FORMS.forEach(k => { parkOp(k); bumpGen(k); });
   /* Formulare gehören zu Motorrad UND Bestand (Kennung): nach dem Einspielen derselben Garage sind sie neu */
   ['logForm', 'rideForm', 'setupForm', 'defectForm', 'meterForm'].forEach(fid => { const f = $('#' + fid); if (!f) return; f.reset(); f.dataset.bike = id; f.dataset.epoch = S.epoch || ''; $$('[aria-invalid]', f).forEach(x => x.removeAttribute('aria-invalid')); });
+  TY.sync();   /* ab 1.9.0: Felder „eigene Angabe“ im Setup */
   $('#rInWrap').hidden = true;
   hf.dataset.bike = id; hf.dataset.epoch = S.epoch || '';
   $('#logDetails').open = false; $('#rideDetails').open = false; $('#setupDetails').open = false;
@@ -1717,6 +1720,7 @@ export function formBike(f){
 function fillSetupForm(s, asCopy){
   $('#sTrack').value = asCopy ? '' : (s.track || '');
   SF.forEach(([el, k]) => { $('#' + el).value = v2(s[k]); });
+  TY.fill(s);   /* ab 1.9.0: Reifen und Untergrund (auch „Als Vorlage“) */
   $('#sNote').value = s.note || '';
   S.editSetup = asCopy ? null : s.id;
   /* Ab 1.4.0 (A1): Grundlage des Entwurfs = gespeicherter Eintrag beim Öffnen (derselbe Datensatz wie das Formular) und
@@ -1758,6 +1762,7 @@ function setupConflict(id, code){
     if (str(inp.value) === str(asText(base[k]))) { inp.value = asText(now[k]); took.push(l + ' ' + shown(k, now[k])); }
     else both.push(l + ': dort ' + shown(k, now[k]) + ', bei dir ' + (inp.value ? (k === 'track' || k === 'note' ? '„' + inp.value + '“' : inp.value) : '(leer)'));
   });
+  TY.merge(base, now, took, both);   /* ab 1.9.0: Reifen und Untergrund ebenso */
   S.setupBase = {id, epoch: S.epoch || '', raw: setupRaw(Object.assign({}, now, {id}))};
   setupMsg('Dieses Setup wurde inzwischen in einem anderen Fenster geändert. Es wurde nichts gespeichert. ' + (took.length ? 'Übernommen (von dir nicht geändert): ' + took.join(', ') + '. ' : '') + (both.length ? 'An beiden Stellen geändert: ' + both.join('; ') + '. ' : '') + 'Deine Änderungen stehen noch hier; tipp erneut auf „Änderungen speichern“, um sie bewusst zu übernehmen.');
   drafts.touch('setup'); toast(EDIT_MSG);
@@ -1767,16 +1772,17 @@ export function keepSetupDraft(){
   if (!drafts.isDirty('setup') || !$('#setupDetails').open) return null;
   const f = $('#setupForm'), v = {sTrack: $('#sTrack').value, sNote: $('#sNote').value};
   SF.forEach(([el]) => { v[el] = $('#' + el).value; });
-  return {bike: f.dataset.bike, values: v};
+  return {bike: f.dataset.bike, values: v, tyres: TY.values()};
 }
 export function restoreSetupDraft(k){
   if (!k || !S.bikes[k.bike] || S.bike !== k.bike) return false;
   Object.keys(k.values).forEach(el => { const i = $('#' + el); if (i) i.value = k.values[el]; });
+  TY.restore(k.tyres);
   setupAsNew('Die Daten wurden inzwischen durch eine eingespielte Sicherung ersetzt. Dein Setup-Entwurf wurde nicht gespeichert und steht noch hier; mit „Als neues Setup speichern“ legst du ihn bewusst neu an, „Abbrechen“ verwirft ihn.');
   return true;
 }
 function resetSetupForm(){
-  const f = $('#setupForm'); f.reset(); f.dataset.bike = S.bike; f.dataset.epoch = S.epoch || ''; S.editSetup = null; S.setupBase = null; setupMsg('');
+  const f = $('#setupForm'); f.reset(); TY.sync(); f.dataset.bike = S.bike; f.dataset.epoch = S.epoch || ''; S.editSetup = null; S.setupBase = null; setupMsg('');
   parkOp('setupForm');
   $('#setupFormTitle').textContent = 'Setup speichern'; $('#sSave').textContent = 'Setup speichern'; $('#sCancel').hidden = true;
   drafts.mark('setup');
@@ -1962,6 +1968,7 @@ export async function onClick(t){
   if (t.id === 'qDrop') { if (S.pending && S.pending.saving) return true; if (S.pending) parkPendingEntries(S.pending.entries); S.pending = null; renderQuick(); return true; }
   if (t.id === 'checkReset') { const b = curBike(); if (b) { lsSet('check-' + b.id, JSON.stringify({date: todayISO(), ids: []})); renderChecklist(b); } return true; }
   if (t.id === 'sCancel') { resetSetupForm(); return true; }
+  if (t.id === 'sTyresTake') { TY.takeMounted(curBike()); return true; }   /* ab 1.9.0: nur Vorschlag im Formular */
   if (t.id === 'dfCancel') { if (S.ops.doneForm && S.ops.doneForm.saving) return true; parkOp('doneForm'); closeDraft('doneForm'); renderStatus(); return true; }
   if (t.id === 'manReplace') { drafts.begin(() => { S.editing.manual = true; S.manMsg = null; renderManual(true); drafts.mark('manual'); }, ['manual']); return true; }
   if (t.id === 'manCancel') { S.editing.manual = false; S.manMsg = null; renderManual(true); drafts.mark('manual'); return true; }
@@ -2062,6 +2069,7 @@ export function onInput(t){
 }
 
 export function onChange(t){
+  if (t.dataset && t.dataset.tyresel != null) { TY.sync(); return false; }   /* ab 1.9.0: Feld „eigene Angabe“ zeigen */
   if (beleg.onChange(t)) return true;   /* ab 1.6.0: Beleg übernehmen */
   if (teile.onChange(t)) return true;   /* ab 1.7.0: Teilehistorie */
   /* Artikel aus einem Foto: offene Eingaben im Teileformular erst klären (Rückfrage), dann das Bild übernehmen */
@@ -2322,6 +2330,8 @@ export async function onSubmit(f, busy){
     const data = {bike: b.id, track: str($('#sTrack').value).slice(0, 120), note: str($('#sNote').value).slice(0, 2000), updated: todayISO()};
     if (!data.track) throw new VErr($('#sTrack'), 'Gib der Strecke einen Namen.');
     SF.forEach(([el, k, l, r]) => { data[k] = fieldNum(el, l, r); });
+    /* ab 1.9.0 (Issue #16): Reifen je Rad und Untergrund – eigene Kopie, ohne Reifenwechsel, Lager oder Wartung */
+    const ty = TY.read(); if (ty.tyres) data.tyres = ty.tyres; if (ty.surface) data.surface = ty.surface;
     const g = S.gen.setupForm || 0;
     busy(true);
     let ok;
@@ -2330,6 +2340,8 @@ export async function onSubmit(f, busy){
          wird nicht neu angelegt (Änderung statt Ersetzen), ein eingespielter Bestand nicht überschrieben */
       const id = S.editSetup, sb = S.setupBase && S.setupBase.id === id ? S.setupBase : {epoch: f.dataset.epoch || S.epoch || '', raw: setupRaw(Object.assign({}, store.peek('setups', id), {id}))};
       const patch = canonDoc('setups', data);
+      /* geleerte Reifen-/Untergrundangaben entfernen (die Änderung ergänzt sonst nur Felder); Setups ohne solche Angaben bleiben ohne die Felder */
+      if (!patch.tyres && sb.raw.tyres != null) patch.tyres = null; if (!patch.surface && sb.raw.surface != null) patch.surface = null;
       const r = await flow(() => store.commitR([{coll: 'setups', id, patch, guard: sb.raw}], null, 'setup-edit', {epoch: sb.epoch}));
       ok = r === 'ok';
       if (r === 'fail' && S.lastErr && ['changed', 'not_found', 'stale'].includes(S.lastErr.code)) {
@@ -2363,6 +2375,7 @@ export async function onSubmit(f, busy){
 
 /* Statische Formularteile einmal füllen */
 export function initBikeForms(){
+  TY.init();   /* ab 1.9.0: Reifen und Untergrund im Setup */
   /* Teileformular von Anfang an vollständig (Kategorien, „Bild hinzufügen“), nicht erst nach einem anderen Ablauf (PR 2, P2) */
   stock.fillCats(); partModeUi();
   $('#rGround').innerHTML = '<option value="">–</option>' + GROUNDS.map(g => '<option>' + g + '</option>').join('');

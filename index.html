@@ -221,6 +221,36 @@
             <div class="f"><label for="sPF">Reifendruck vorn (bar)</label><input id="sPF" inputmode="decimal"></div>
             <div class="f"><label for="sPR">Reifendruck hinten (bar)</label><input id="sPR" inputmode="decimal"></div>
           </div>
+          <!-- ab 1.9.0 (Issue #16): Reifen je Rad und Untergrund – eigene Kopie im Setup, nur auf Wunsch aus den montierten Reifen -->
+          <fieldset id="sTyres"><legend>Reifen</legend>
+            <fieldset class="tyre-wheel"><legend>Vorderrad</legend>
+              <div class="grid">
+                <div class="f"><label for="sTfMaker">Hersteller</label><input id="sTfMaker" maxlength="60" autocomplete="off"></div>
+                <div class="f"><label for="sTfModel">Modell</label><input id="sTfModel" maxlength="120" autocomplete="off"></div>
+                <div class="f"><label for="sTfComp">Mischung / Einsatz</label><select id="sTfComp" data-tyresel></select></div>
+                <div class="f" id="sTfCompXWrap" hidden><label for="sTfCompX">Mischung (eigene Angabe)</label><input id="sTfCompX" maxlength="40" autocomplete="off"></div>
+                <div class="f"><label for="sTfSys">System</label><select id="sTfSys" data-tyresel></select></div>
+                <div class="f" id="sTfSysXWrap" hidden><label for="sTfSysX">System (andere Angabe)</label><input id="sTfSysX" maxlength="40" autocomplete="off"></div>
+              </div>
+            </fieldset>
+            <fieldset class="tyre-wheel"><legend>Hinterrad</legend>
+              <div class="grid">
+                <div class="f"><label for="sTrMaker">Hersteller</label><input id="sTrMaker" maxlength="60" autocomplete="off"></div>
+                <div class="f"><label for="sTrModel">Modell</label><input id="sTrModel" maxlength="120" autocomplete="off"></div>
+                <div class="f"><label for="sTrComp">Mischung / Einsatz</label><select id="sTrComp" data-tyresel></select></div>
+                <div class="f" id="sTrCompXWrap" hidden><label for="sTrCompX">Mischung (eigene Angabe)</label><input id="sTrCompX" maxlength="40" autocomplete="off"></div>
+                <div class="f"><label for="sTrSys">System</label><select id="sTrSys" data-tyresel></select></div>
+                <div class="f" id="sTrSysXWrap" hidden><label for="sTrSysX">System (andere Angabe)</label><input id="sTrSysX" maxlength="40" autocomplete="off"></div>
+              </div>
+            </fieldset>
+            <div class="row"><button class="mini" type="button" id="sTyresTake">Montierte Reifen übernehmen</button></div>
+            <p class="hint" id="sTyresHint">Übernimmt nur Hersteller und Modell der jetzt montierten Reifen als Vorschlag. Das Setup behält seine Angaben auch nach einem späteren Reifenwechsel. „Sand“ ist eine Einsatz- bzw. Profilangabe, keine Gummihärte; gleiche Namen bedeuten nicht bei jedem Hersteller dasselbe.</p>
+          </fieldset>
+          <fieldset id="sSurface"><legend>Untergrund</legend>
+            <div class="checks" id="sSurfBox"></div>
+            <div class="f"><label for="sSurfX">Eigene Angabe</label><input id="sSurfX" maxlength="60" autocomplete="off" placeholder="z. B. Wiese, Schotter"></div>
+            <p class="hint">Mehrere möglich (gemischter Untergrund). Nichts gewählt heißt: unbekannt.</p>
+          </fieldset>
           <div class="f"><label for="sNote">Notiz</label><textarea id="sNote" rows="2"></textarea></div>
           <div class="row">
             <button class="btn primary" type="submit" id="sSave">Setup speichern</button>
