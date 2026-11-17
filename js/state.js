@@ -8,12 +8,18 @@ export const COLLS = ['bikes', 'log', 'rides', 'setups', 'parts', 'defects'];
 export function lsGet(k){ try { return localStorage.getItem('rb-' + k); } catch (e) { return null; } }
 export function lsSet(k, v){ try { localStorage.setItem('rb-' + k, v); return true; } catch (e) { return false; } }
 export function lsDel(k){ try { localStorage.removeItem('rb-' + k); } catch (e) {} }
+/* ab 1.7.3 (Issue #14): das zuletzt bewusst geöffnete Motorrad (Karte in der Garage, Direktlink, Auswahl, Motorradwechsel).
+   Je Fenster (sessionStorage, übersteht Neuladen; zwei Fenster behalten je ihr Motorrad) und als letzte Wahl des Geräts
+   (localStorage, für einen neuen Start). Anders als S.bike (immer gesetzt, bindet die Formulare) kann sie leer sein:
+   dann wird beim Öffnen eines Motorradbereichs gefragt. */
+export function pickedGet(){ try { return sessionStorage.getItem('rb-auswahl') || lsGet('auswahl') || ''; } catch (e) { return lsGet('auswahl') || ''; } }
+export function pickedSet(id){ S.picked = id || ''; try { sessionStorage.setItem('rb-auswahl', S.picked); } catch (e) {} lsSet('auswahl', S.picked); }
 export function lsJSON(k, def){ try { const v = JSON.parse(lsGet(k) || 'null'); return v == null ? def : v; } catch (e) { return def; } }
 
 export const S = {
   mode: 'loading', err: '', demo: false,
   loaded: {bikes: false, log: false, rides: false, setups: false, parts: false, defects: false},
-  bike: lsGet('bike') || '', view: 'home', section: lsGet('section') || 'status',
+  bike: lsGet('bike') || '', picked: '', view: 'home', section: lsGet('section') || 'status',
   bikes: {}, log: [], rides: [], setups: [], parts: [], defects: [], der: {},
   meta: {changeSeq: 0, lastBackupAt: null, lastBackupSeq: 0, lastBackupName: '', lastBackupSize: 0, lastBackupHow: ''},
   editing: {}, logTasks: new Set(), editSetup: null, setupBase: null, pending: null,

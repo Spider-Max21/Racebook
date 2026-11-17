@@ -38,10 +38,11 @@ export function renderNavigation(){
   if ($('#bikeSectionLinks').innerHTML !== links) $('#bikeSectionLinks').innerHTML = links;
 }
 
+export const pickedBike = () => (S.picked && S.bikes[S.picked]) || null;
 function showMore(){
-  const b = R.route.page === 'bike' ? curBike() : null;
+  const onBike = R.route.page === 'bike', b = onBike ? curBike() : pickedBike();   /* ab 1.7.3: auch auf Lager/Einstellungen das gewählte Motorrad */
   $('#moreBody').innerHTML = '<h3>Racebook</h3><div class="menu-grid">' + button('home') + button('inventory') + '</div>'
-    + '<h3>' + esc(b ? titleOf(b) : 'Am Motorrad') + '</h3>' + (!b ? '<p class="hint">Beim Öffnen wählst du das Motorrad.</p>' : '')
+    + '<h3>' + esc(b ? titleOf(b) : 'Am Motorrad') + '</h3>' + (!b ? '<p class="hint">Beim Öffnen wählst du das Motorrad.</p>' : !onBike ? '<p class="hint" id="moreBikeHint">Öffnet die Bereiche dieses Motorrads. Ein anderes wählst du in der Garage.</p>' : '')
     + '<div class="menu-grid">' + SECTIONS.map(([id,label]) => button(id,label)).join('') + '</div>'
     + '<h3>App</h3><div class="menu-grid">' + button('data') + button('navigation') + button('help') + '</div>';
   $('#moreDlg').showModal(); renderNavigation();
@@ -50,6 +51,10 @@ function chooseBike(section){
   const bikes = bikeList();
   if (!bikes.length) { toast('Leg zuerst ein Motorrad in der Garage an.'); R.go({page:'home'}); return; }
   if (R.route.page === 'bike' && S.bikes[R.route.bike]) { R.go({page:'bike',bike:R.route.bike,section}); return; }
+  /* ab 1.7.3 (Issue #14): das zuletzt geöffnete Motorrad bleibt über Lager und Einstellungen hinweg gewählt; nur ohne gültige
+     Auswahl (z. B. frisches Profil, Motorrad entfernt) wird gefragt */
+  const kept = pickedBike();
+  if (kept) { R.go({page:'bike',bike:kept.id,section}); return; }
   if (bikes.length === 1) { R.go({page:'bike',bike:bikes[0].id,section}); return; }
   target = section;
   $('#navPickHint').textContent = LABELS[section] + ' öffnen für:';

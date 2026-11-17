@@ -393,7 +393,8 @@
   <section id="v-help" class="view" hidden aria-label="Hilfe">
     <div class="card help">
       <h2>So funktioniert Racebook</h2>
-      <p><b>Meine Garage:</b> Die Startseite zeigt alle Motorräder als Karten mit Stand, nächster Wartung und offenen Mängeln. Tipp auf eine Karte, um das Motorrad zu öffnen. Zurück zur Übersicht kommst du über „Garage“ ganz links in der unteren Leiste. Oben steht, welcher Bereich gerade offen ist, darunter das Motorrad.</p>
+      <p><b>Meine Garage:</b> Die Startseite zeigt alle Motorräder als Karten mit Stand, nächster Wartung und offenen Mängeln. Tipp auf eine Karte, um das Motorrad zu öffnen. Zurück zur Übersicht kommst du über „Garage“ ganz links in der unteren Leiste. Oben steht, welcher Bereich gerade offen ist, darunter das Motorrad. Die Reihenfolge der Karten änderst du, indem du eine Karte lange drückst und ziehst, oder über die drei Punkte an der Karte.</p>
+      <p><b>Gewähltes Motorrad:</b> Das zuletzt geöffnete Motorrad bleibt gewählt, auch im Lager und in den Einstellungen (oben klein genannt). Logbuch, Handbuch und die anderen Bereiche öffnen sich dann direkt für dieses Motorrad. Ein anderes wählst du in der Garage.</p>
       <p><b>Stand eintragen:</b> Tipp unter Status auf das Nummernschild.</p>
       <p><b>Ungespeicherte Eingaben:</b> Wechselst du mit geänderten, noch nicht gespeicherten Eingaben zu einem anderen Motorrad, Bereich oder Formular, fragt Racebook nach: „Speichern“, „Verwerfen“ oder „Weiter bearbeiten“. Hat jemand dieselben Daten inzwischen in einem anderen Fenster geändert, speichert Racebook nicht einfach darüber, sondern zeigt den aktuellen Stand mit deinen Änderungen zum Prüfen.</p>
       <p><b>Tätigkeiten:</b> Im Logbuch wählst du, was du tatsächlich gemacht hast (häufige Arbeiten, Favoriten mit Stern, Suche im ganzen Katalog oder freie Eingabe). Getrennt davon stehen die betroffenen Wartungsintervalle. Racebook schlägt ein Intervall nur vor, wenn die Tätigkeiten es vollständig abdecken. „Öl gewechselt“ erledigt zum Beispiel nicht „Motoröl + Ölfilter“, solange der Filter nicht genannt ist. Unklares wie „Gabel gemacht“ musst du selbst auswählen.</p>
@@ -441,10 +442,13 @@
   <div class="row"><button class="btn primary" type="button" id="cropOk">Übernehmen</button><button class="btn" type="button" id="cropReset">Zurücksetzen</button><button class="btn ghost" type="button" id="cropCancel">Abbrechen</button></div>
 </dialog>
 
-<dialog id="pickDlg" class="sheet" aria-labelledby="pickTitle">
-  <h2 id="pickTitle">Für welches Motorrad?</h2>
-  <div id="pickList" class="stack"></div>
-  <div class="row"><button class="btn ghost" type="button" id="pickCancel">Abbrechen</button></div>
+<!-- ab 1.7.3 (Issue #14): Reihenfolge einer Garagenkarte ohne Geste (Tastatur, Bildschirmleser); die frühere Auswahl für
+     „Fahrt eintragen“/„Wartung eintragen“ in der Garage entfällt -->
+<dialog id="cardMenuDlg" class="sheet" aria-labelledby="cardMenuTitle" aria-describedby="cardMenuPos">
+  <h2 id="cardMenuTitle">Reihenfolge</h2>
+  <p class="hint" id="cardMenuPos"></p>
+  <div class="row"><button class="btn" type="button" id="cardUp">Nach oben</button><button class="btn" type="button" id="cardDown">Nach unten</button></div>
+  <div class="row"><button class="btn ghost" type="button" id="cardMenuClose">Fertig</button></div>
 </dialog>
 
 <dialog id="jumpDlg" class="sheet" aria-labelledby="jumpTitle" aria-describedby="jumpText">

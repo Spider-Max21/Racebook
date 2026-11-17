@@ -1,7 +1,7 @@
 /* Racebook – Start, Navigation, Speicher verbinden, Ereignisse verteilen, Aktualisierung der App.
    Aufbau:  util/domain (Fachlogik) · db/store (Speicher) · ops (Vorgänge) · views/* (Oberfläche). */
 import {validId} from './util.js';
-import {S, COLLS, lsGet, lsSet, bikeList, curBike} from './state.js';
+import {S, COLLS, lsGet, lsSet, bikeList, curBike, pickedGet, pickedSet} from './state.js';
 import {cleanDoc, derive} from './domain.js';
 import * as DB from './db.js';
 import * as store from './store.js';
@@ -78,7 +78,11 @@ function renderChrome(){
   const bikeCtx = p === 'bike' && b ? bike.titleOf(b) + (b.nickname ? ' · ' + ((b.brand || '') + ' ' + (b.model || '')).trim() : '') : '';
   const t = p === 'bike' && b ? sec : p === 'data' ? 'Einstellungen' : p === 'inventory' ? 'Lager' : p === 'navigation' ? 'Menü anpassen' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
   title.hidden = !t;
-  title.innerHTML = t ? '<span class="bt-main">' + escHTML(t) + '</span>' + (bikeCtx ? '<span class="bt-sub">' + escHTML(bikeCtx) + '</span>' : '') : '';
+  /* ab 1.7.3 (Issue #14): auf Lager, Einstellungen, Menü und Hilfe klein das gewählte Motorrad (Bereiche über „Mehr“ und die untere
+     Leiste öffnen dieses); das Lager bleibt der gemeinsame Bestand aller Motorräder, nichts wird danach gefiltert */
+  const kept = (p === 'inventory' || p === 'data' || p === 'navigation' || p === 'help') ? nav.pickedBike() : null;
+  const sub = bikeCtx || (kept ? 'Gewähltes Motorrad: ' + bike.titleOf(kept) : '');
+  title.innerHTML = t ? '<span class="bt-main">' + escHTML(t) + '</span>' + (sub ? '<span class="bt-sub">' + escHTML(sub) + '</span>' : '') : '';
   const chip = $('#backupChip');
   const has = (bikeList().length > 0 || S.parts.length > 0 || !!S.navigation) && S.mode === 'ready';
   chip.hidden = !has || p === 'data';
@@ -206,6 +210,7 @@ function applyRoute(r){
     if (!S.bikes[r.bike]) { toast('Dieses Motorrad gibt es auf diesem Gerät nicht.'); navigate({page: 'home'}, {replace: true}); return; }
     bike.setBike(r.bike);
     S.section = r.section;
+    pickedSet(r.bike);   /* ab 1.7.3 (Issue #14): bewusst geöffnet → bleibt gewählt, auch über Lager und Einstellungen */
   }
   if (S.mode === 'ready' && r.page === 'add' && R.route.page !== 'add') { S.adding = true; const el = $('#addBike'); if (el) el.innerHTML = ''; }
   const changed = R.route.page !== r.page || R.route.bike !== r.bike;
@@ -438,6 +443,7 @@ async function boot(){
   await data.refreshMeta();
   await nav.refreshPreferences();
   S.v8 = readV8Local();
+  S.picked = pickedGet();   /* ab 1.7.3 (Issue #14): zuletzt bewusst geöffnetes Motorrad (dieses Fenster bzw. dieses Gerät) */
   store.emitAll();
   if (!S.bikes[S.bike]) { const b = bikeList()[0]; S.bike = b ? b.id : ''; }
   /* Formulare an den geladenen Bestand und das gewählte Motorrad binden */
