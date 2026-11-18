@@ -1,6 +1,6 @@
 # Racebook
 
-Version **1.11.0** – lokales Wartungs- und Werkstattheft für Motorräder als Progressive Web App.
+Version **1.12.0** – lokales Wartungs- und Werkstattheft für Motorräder als Progressive Web App.
 
 App: https://spider-max21.github.io/Racebook/
 

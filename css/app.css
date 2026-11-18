@@ -658,3 +658,23 @@ body.card-drag{-webkit-user-select:none;user-select:none}
 #homeBody.order-busy #bikeCards{opacity:.7}
 .reorder-hint{margin:8px 0 0;font-size:13px}
 #cardMenuDlg .row .btn{min-width:120px}
+
+/* Auswertung Kosten und Nutzung (ab 1.12.0) */
+.stats-card h2{margin-bottom:2px}
+.stats-total{margin:6px 0 10px}
+.stats-total b{font-size:26px;font-variant-numeric:tabular-nums}
+.stats-tab{width:100%;border-collapse:collapse;margin:8px 0}
+.stats-tab caption{text-align:left;font-weight:700;color:var(--muted);padding:4px 0}
+.stats-tab th,.stats-tab td{padding:8px 4px;border-top:1px solid var(--line);vertical-align:top}
+.stats-tab th{text-align:left;font-weight:500;overflow-wrap:anywhere}
+.stats-tab td{text-align:right;font-variant-numeric:tabular-nums}
+.stats-tab td b,.stats-tab td:first-of-type{white-space:nowrap}
+.stats-tab td .hint{white-space:normal}
+.stats-notes{padding-left:18px;margin:8px 0}
+.stats-more{margin-top:8px}
+.stats-more summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600}
+.stats-list{list-style:none;padding:0;margin:4px 0}
+.stats-list li{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
+.stats-list li span{min-width:0;overflow-wrap:anywhere}
+.stats-list b{white-space:nowrap;font-variant-numeric:tabular-nums}
+.stats-range{display:grid;gap:4px}

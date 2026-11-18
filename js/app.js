@@ -13,6 +13,7 @@ import * as bike from './views/bike.js';
 import * as defects from './views/defects.js';
 import * as home from './views/home.js';
 import * as data from './views/data.js';
+import * as stats from './views/stats.js';
 import * as counter from './views/counter.js';
 import * as drafts from './drafts.js';
 import * as nav from './navigation.js';
@@ -29,7 +30,7 @@ function applyTheme(){
 applyTheme();
 
 /* ---------- Seiten ---------- */
-const PAGES = ['home', 'bike', 'inventory', 'navigation', 'data', 'help', 'add', 'error'];
+const PAGES = ['home', 'bike', 'inventory', 'stats', 'navigation', 'data', 'help', 'add', 'error'];
 function showPage(p){
   PAGES.forEach(x => { const el = $('#v-' + x); if (el) el.hidden = x !== p; });
   $('#tabs').hidden = p === 'error';
@@ -78,11 +79,11 @@ function renderChrome(){
   /* ab 1.7.2 (Issue #12): auf der Motorrad-Seite oben der geöffnete Bereich, darunter das Motorrad als Kontext */
   const sec = p === 'bike' && b ? (SECTION_LABEL[R.route.section] || SECTION_LABEL.status) : '';
   const bikeCtx = p === 'bike' && b ? bike.titleOf(b) + (b.nickname ? ' · ' + ((b.brand || '') + ' ' + (b.model || '')).trim() : '') : '';
-  const t = p === 'bike' && b ? sec : p === 'data' ? 'Einstellungen' : p === 'inventory' ? 'Lager' : p === 'navigation' ? 'Menü anpassen' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
+  const t = p === 'bike' && b ? sec : p === 'data' ? 'Einstellungen' : p === 'inventory' ? 'Lager' : p === 'stats' ? 'Auswertung' : p === 'navigation' ? 'Menü anpassen' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
   title.hidden = !t;
   /* ab 1.7.3 (Issue #14): auf Lager, Einstellungen, Menü und Hilfe klein das gewählte Motorrad (Bereiche über „Mehr“ und die untere
      Leiste öffnen dieses); das Lager bleibt der gemeinsame Bestand aller Motorräder, nichts wird danach gefiltert */
-  const kept = (p === 'inventory' || p === 'data' || p === 'navigation' || p === 'help') ? nav.pickedBike() : null;
+  const kept = (p === 'inventory' || p === 'stats' || p === 'data' || p === 'navigation' || p === 'help') ? nav.pickedBike() : null;
   const sub = bikeCtx || (kept ? 'Gewähltes Motorrad: ' + bike.titleOf(kept) : '');
   title.innerHTML = t ? '<span class="bt-main">' + escHTML(t) + '</span>' + (sub ? '<span class="bt-sub">' + escHTML(sub) + '</span>' : '') : '';
   const chip = $('#backupChip');
@@ -202,6 +203,7 @@ function renderAll(){
   if (S.mode === 'ready') bike.renderInventory();
   if (p === 'navigation') nav.renderEditor();
   if (p === 'data') data.renderData();
+  if (p === 'stats') stats.renderStats();
   if (p === 'add') bike.renderAddBike();
   counter.onRender();
   drafts.settle();
@@ -363,7 +365,7 @@ document.addEventListener('input', e => {
   if (t.getAttribute && t.getAttribute('aria-invalid')) t.removeAttribute('aria-invalid');
   if (t.id === 'inventorySearch') { bike.renderInventory(); return; }
   nav.onInput(t);
-  defects.onInput(t) || bike.onInput(t);
+  stats.onInput(t) || defects.onInput(t) || bike.onInput(t);
 });
 document.addEventListener('change', e => { const t = e.target; if (nav.onChange(t)) return; if (t.id === 'inventoryBike' || t.id === 'inventoryLow') { bike.renderInventory(); return; } defects.onChange(t) || data.onChange(t) || bike.onChange(t); });
 document.addEventListener('submit', e => {
