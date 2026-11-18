@@ -13,6 +13,7 @@ import {$, toast, errText, arm, fmtSize, icon} from '../ui.js';
 import {R} from '../registry.js';
 import * as ocr from '../ocr.js';
 import {listPoints, restorePoint} from '../points.js';
+import * as filebk from '../filebackup.js';
 
 const SRC = {zip: 'ZIP-Sicherung von Racebook', v8: 'Sicherung aus der bisherigen Racebook-App (JSON)', 'v8-local': 'bisherige Racebook-Version auf diesem Gerät'};
 
@@ -33,7 +34,7 @@ export async function refreshMeta(){
 /* ab 1.10.0: Wiederherstellungspunkte für die Anzeige neu lesen. Ergebnis: true, wenn sich gegenüber der zuletzt gezeigten
    Karte etwas geändert hat (nur dann neu zeichnen; ein Lauf ohne neuen Punkt ändert die Seite nicht) */
 let pointsShown = '';
-const pointsSig = () => JSON.stringify([S.points || null, S.pointRun || null, S.snapshot || null, S.epoch || '', S.changeSeq || 0]);
+const pointsSig = () => JSON.stringify([S.points || null, S.pointRun || null, S.snapshot || null, S.epoch || '', S.changeSeq || 0, S.fileBk || null, S.backup || null]);
 export const pointsDirty = () => pointsSig() !== pointsShown;
 export async function refreshPoints(){
   if (!DB.isOpen()) return false;
@@ -54,10 +55,11 @@ function backupStatus(){
   if (!b) return S.backupForeign
     ? '<p><b>Für den jetzigen Stand gibt es noch keine Sicherung.</b> Die letzte Sicherung stammt aus dem Stand vor dem letzten Einspielen oder Wiederherstellen.</p>'
     : '<p><b>Noch keine Sicherung erstellt.</b> Alle Daten liegen nur in diesem Browser auf diesem Gerät.</p>';
-  const how = b.how === 'share' ? 'zum Teilen übergeben' : b.how === 'import' ? 'aus dieser Sicherung eingespielt' : 'zum Herunterladen übergeben';
+  const how = b.how === 'share' ? 'zum Teilen übergeben' : b.how === 'import' ? 'aus dieser Sicherung eingespielt' : b.how === 'file' ? 'automatisch in die gewählte Datei geschrieben und geprüft' : 'zum Herunterladen übergeben';
   return '<dl class="kv"><dt>Letzte Sicherung</dt><dd>' + esc(fmtWhen(b.at)) + '</dd><dt>Datei</dt><dd>' + esc(b.name || '–') + (b.size ? ' (' + fmtSize(b.size) + ')' : '') + '</dd><dt>Vorgang</dt><dd>' + how + '</dd>'
     + '<dt>Seitdem</dt><dd>' + (n > 0 ? '<b class="txt-warn">' + n + (n === 1 ? ' Änderung' : ' Änderungen') + '</b>' : 'keine Änderungen') + '</dd></dl>'
-    + '<p class="hint">Racebook weiß nur, dass die Datei erstellt wurde. Ob sie noch in deinen Downloads, deiner Cloud oder auf dem PC liegt, kann die App nicht prüfen.</p>';
+    + (b.how === 'file' ? '<p class="hint">Racebook hat die Datei nach dem Schreiben zurückgelesen und vollständig geprüft. Ob sie auch außerhalb dieses Geräts liegt, zum Beispiel in einem Cloud-Ordner, hängt von der gewählten Ablage ab.</p>'
+      : '<p class="hint">Racebook weiß nur, dass die Datei erstellt wurde. Ob sie noch in deinen Downloads, deiner Cloud oder auf dem PC liegt, kann die App nicht prüfen.</p>');
 }
 /* ab 1.10.0 (Issue #18): automatische Wiederherstellungspunkte auf diesem Gerät */
 const POINT_ERR = {quota_exceeded: 'Der Speicher auf diesem Gerät ist voll.', aborted: 'Der Schreibvorgang wurde unterbrochen.', closed: 'Der Speicher war gerade nicht erreichbar.'};
@@ -82,6 +84,39 @@ function pointsHTML(){
     + ok.map(p => '<li><p><b>' + esc(fmtWhen(p.created)) + '</b>' + (cur(p) ? ' (jetziger Stand)' : p.epoch !== (S.epoch || '') ? ' (vor dem letzten Ersetzen)' : '') + '<br>' + esc(countText(p.counts)) + ', ' + p.files + (p.files === 1 ? ' Datei' : ' Dateien')
       + (p.bikes.length ? '<br>' + esc(p.bikes.join('; ')) : '') + (p.missing ? '<br><span class="txt-warn">Unvollständig: ' + (p.missing === 1 ? 'ein Foto oder PDF fehlte' : p.missing + ' Fotos oder PDFs fehlten') + ' schon beim Anlegen.</span>' : '') + '</p><div class="row"><button class="mini" type="button" data-pointrestore="' + esc(p.id) + '" data-arm="Alle Daten durch diesen Stand ersetzen?"' + (S.importBusy ? ' disabled' : '') + '>Diesen Stand wiederherstellen</button></div></li>').join('')
     + '</ul><p class="hint">Dabei werden alle Daten auf diesem Gerät durch den gewählten Stand ersetzt. Der jetzige Stand wird vorher zur Sicherheitskopie, du kannst also zurücktauschen.</p></details>';
+  return h + '</div>';
+}
+/* ab 1.11.0 (Issue #18 Teil 2): Sicherungsdatei außerhalb des App-Speichers, nur wo der Browser selbst in eine gewählte Datei schreiben kann */
+function fileHTML(){
+  const f = S.fileBk || {state: filebk.supported() ? 'loading' : 'unsupported'};
+  const has = bikeList().length > 0 || S.parts.length > 0;
+  let h = '<div class="bk-file" id="fileBox"><h3>Automatisch in eine Datei</h3>';
+  if (f.state === 'unsupported')
+    return h + '<p id="fileStatus">Dieser Browser kann nicht selbst in eine Datei schreiben (zum Beispiel Safari auf iPhone und iPad oder Firefox). Nutze „Sicherung herunterladen“ oder „Teilen“ und lege die Datei in deine Cloud oder auf den PC.</p></div>';
+  if (f.state === 'loading') return h + '<p class="hint thinking" id="fileStatus">Wird geladen …</p></div>';
+  if (f.state === 'off')
+    return h + '<p id="fileStatus">Noch nicht eingerichtet.</p><p class="hint">Du wählst einmal, wo die Datei liegen soll, am besten in einem Ordner, der mit deiner Cloud abgeglichen wird. Danach schreibt Racebook nach gespeicherten Änderungen selbst hinein und prüft sie, solange die App offen ist.</p>'
+      + '<div class="row"><button class="btn" type="button" id="fileSetup"' + (has ? '' : ' disabled') + '>Datei für automatische Sicherung wählen</button></div></div>';
+  const last = f.last, n = last ? (S.changeSeq || 0) - (last.seq || 0) : 0, cur = last && last.epoch === (S.epoch || '');
+  const lastTxt = last ? 'Zuletzt geschrieben und geprüft: <b>' + esc(fmtWhen(last.at)) + '</b>' + (last.size ? ' (' + fmtSize(last.size) + ')' : '') + '.' : '';
+  if (f.state === 'needs') h += '<p class="warnbox" id="fileStatus"><b>Freigabe nötig:</b> Der Browser hat den Zugriff auf „' + esc(f.name) + '“ zurückgenommen (das tut er meist nach dem Neuladen oder einem Neustart). Bis du ihn wieder freigibst, schreibt Racebook nichts in die Datei. ' + lastTxt + '</p>'
+    + '<div class="row"><button class="btn primary" type="button" id="fileRegrant">Wieder freigeben</button></div>';
+  else if (f.state === 'denied') h += '<p class="warnbox" id="fileStatus"><b>Zugriff abgelehnt:</b> Racebook darf nicht in „' + esc(f.name) + '“ schreiben. ' + lastTxt + ' Wähle eine andere Datei oder nutze „Sicherung herunterladen“.</p>';
+  else if (f.state === 'error' && f.err.code === 'fehlend') h += '<p class="warnbox" id="fileStatus"><b>Nicht in die Datei geschrieben (' + esc(fmtWhen(f.err.at)) + '):</b> Im App-Speicher '
+    + (f.err.n === 1 ? 'fehlt ein Foto oder PDF' : 'fehlen ' + esc(String(f.err.n || '')) + ' Fotos oder PDFs') + ', auf die Einträge verweisen. Damit die vollständige Sicherung in „' + esc(f.name) + '“'
+    + (last ? ' vom ' + esc(fmtWhen(last.at)) : '') + ' erhalten bleibt, ersetzt Racebook sie nicht durch eine unvollständige. Hol die fehlenden Dateien über eine Sicherung oder einen Wiederherstellungspunkt zurück; '
+    + 'für eine unvollständige Sicherung des jetzigen Stands wähle eine andere Datei oder nutze „Sicherung herunterladen“. Es wurde nichts als gesichert vermerkt.</p>';
+  else if (f.state === 'error') h += '<p class="warnbox" id="fileStatus"><b>Der letzte Versuch (' + esc(fmtWhen(f.err.at)) + ') hat nicht geklappt:</b> ' + esc(filebk.errText(f.err.code)) + ' '
+    + (f.err.code === 'pruefung' ? 'Die Datei ist möglicherweise beschädigt' + (last ? '; die letzte geprüfte Sicherung darin war vom ' + esc(fmtWhen(last.at)) : '') + '. Racebook schreibt sie bei der nächsten Gelegenheit neu. '
+      : last ? 'In der Datei steht weiter der Stand vom ' + esc(fmtWhen(last.at)) + '. ' : '') + 'Es wurde nichts als gesichert vermerkt.</p>';
+  else if (f.state === 'lost') h += '<p class="warnbox" id="fileStatus"><b>Datei neu wählen:</b> ' + esc(filebk.errText('kennung')) + ' ' + lastTxt + ' Bis dahin schreibt Racebook nichts in eine Datei.</p>';
+  else if (f.state === 'partial') h += '<p class="warnbox" id="fileStatus"><b>Unvollständig:</b> In „' + esc(f.name) + '“. ' + lastTxt + ' '
+    + (last.missing === 1 ? 'Ein Foto oder PDF fehlte' : esc(String(last.missing)) + ' Fotos oder PDFs fehlten') + ' schon im App-Speicher und ' + (last.missing === 1 ? 'ist' : 'sind') + ' nicht in der Datei. Diese Sicherung gilt nicht als vollständig.</p>';
+  else if (f.state === 'pending') h += '<p id="fileStatus">Eingerichtet: „' + esc(f.name) + '“. Die erste Sicherung folgt nach der nächsten gespeicherten Änderung.</p>';
+  else h += '<p id="fileStatus">In „' + esc(f.name) + '“. ' + lastTxt + (cur && n > 0 ? ' Seitdem ' + (n === 1 ? 'eine Änderung' : n + ' Änderungen') + '; die Datei wird bald automatisch aktualisiert.' : cur ? ' Entspricht dem jetzigen Stand.' : '') + '</p>';
+  h += '<p class="hint">Racebook schreibt nur, solange die App offen ist (nach Änderungen gebündelt, höchstens alle 10 Minuten, und beim Wechsel in den Hintergrund).</p>'
+    + '<div class="row">' + (f.state === 'ok' || f.state === 'partial' || f.state === 'error' || f.state === 'pending' ? '<button class="btn" type="button" id="fileNow"' + (has ? '' : ' disabled') + '>Jetzt in die Datei schreiben</button>' : '')
+    + '<button class="btn ghost" type="button" id="fileChoose">Andere Datei wählen</button><button class="btn ghost" type="button" id="fileStop" data-arm="Automatische Datei-Sicherung beenden?">Beenden</button></div>';
   return h + '</div>';
 }
 function setupHTML(){
@@ -179,7 +214,7 @@ export function renderData(){
     + '<div class="row"><button class="btn primary" type="button" id="exportBtn"' + (allLoaded() && has && !S.exporting ? '' : ' disabled') + '>' + icon('save') + (S.exporting ? 'Wird erstellt …' : 'Sicherung herunterladen') + '</button>'
     + (navigator.canShare ? '<button class="btn" type="button" id="shareBtn"' + (allLoaded() && has && !S.exporting ? '' : ' disabled') + '>' + icon('share') + 'Sicherung teilen …</button>' : '') + '</div>'
     + '<div id="exportOut">' + (S.shareReady ? '<p class="hint">Sicherung ist bereit: ' + esc(S.shareReady.name) + ' (' + fmtSize(S.shareReady.blob.size) + ').</p><div class="row"><button class="btn primary" type="button" id="shareNow">Jetzt teilen</button></div>' : '') + '</div>'
-    + '<p class="hint">Die Sicherung ist eine ZIP-Datei mit allen Einträgen, Fotos und PDFs. Bewahre eine Kopie außerhalb des Handys auf, zum Beispiel in deiner Cloud oder auf dem PC. Nur sie schützt, wenn die Website-Daten gelöscht werden oder das Handy verloren geht.</p></div>' + setupHTML() + '</section>');
+    + '<p class="hint">Die Sicherung ist eine ZIP-Datei mit allen Einträgen, Fotos und PDFs. Bewahre eine Kopie außerhalb des Handys auf, zum Beispiel in deiner Cloud oder auf dem PC. Nur sie schützt, wenn die Website-Daten gelöscht werden oder das Handy verloren geht.</p>' + fileHTML() + '</div>' + setupHTML() + '</section>');
   parts.push('<section class="card" id="importCard"><h2>Sicherung einspielen</h2>'
     + (S.importDraft ? previewHTML(S.importDraft)
       : '<p class="hint">ZIP-Sicherung von Racebook oder JSON-Sicherung aus der bisherigen Racebook-App in Claude. Vor dem Einspielen siehst du, was drin ist.</p>'
@@ -325,6 +360,28 @@ export async function onClick(t){
     S.importBusy = false;
     await refreshMeta(); R.renderAll();
     return true;
+  }
+  /* ab 1.11.0: Sicherungsdatei außerhalb des App-Speichers */
+  if (t.id === 'fileSetup' || t.id === 'fileChoose' || t.id === 'fileRegrant' || t.id === 'fileNow') {
+    if (S.fileBusy) return true;
+    S.fileBusy = true; t.disabled = true;
+    let r;
+    try { r = t.id === 'fileRegrant' ? await filebk.regrant() : t.id === 'fileNow' ? await filebk.write(true) : await filebk.choose(); }
+    catch (e) { r = {result: 'error', code: (e && e.name) || 'unknown'}; }
+    S.fileBusy = false;
+    await refreshMeta(); await filebk.refresh();
+    toast(r.result === 'ok' ? 'Sicherung in die Datei geschrieben und geprüft.'
+      : r.result === 'partial' ? 'In die Datei geschrieben und geprüft, aber unvollständig: ' + (r.n === 1 ? 'ein Foto oder PDF fehlt' : r.n + ' Fotos oder PDFs fehlen') + ' im App-Speicher. Nicht als Sicherung vermerkt.'
+      : r.result === 'error' && r.code === 'fehlend' ? 'Nicht in die Datei geschrieben: Im App-Speicher ' + (r.n === 1 ? 'fehlt ein Foto oder PDF' : 'fehlen ' + r.n + ' Fotos oder PDFs') + '. Die vollständige Sicherung in der Datei bleibt erhalten.'
+      : r.result === 'cancel' ? 'Keine Datei gewählt. Es wurde nichts geändert.'
+      : r.result === 'needs' || r.result === 'denied' ? 'Ohne Freigabe kann Racebook nicht in die Datei schreiben.' : r.result === 'empty' ? 'Es gibt noch nichts zu sichern.'
+      : r.result === 'same' ? 'Die Datei enthält schon den jetzigen Stand.' : r.result === 'off' ? 'Die automatische Datei-Sicherung ist nicht eingerichtet.' : r.result === 'lost' ? filebk.errText('kennung')
+      : 'Nicht gesichert: ' + filebk.errText(r.code));
+    R.renderAll(); return true;
+  }
+  if (t.id === 'fileStop') {
+    if (!arm(t)) return true;
+    await filebk.stop(); toast('Automatische Datei-Sicherung beendet. Die Datei selbst bleibt, wo sie ist.'); R.renderAll(); return true;
   }
   if (t.dataset.pointrestore) {
     if (!arm(t)) return true;

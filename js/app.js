@@ -17,6 +17,7 @@ import * as counter from './views/counter.js';
 import * as drafts from './drafts.js';
 import * as nav from './navigation.js';
 import * as points from './points.js';
+import * as filebk from './filebackup.js';
 
 /* ---------- Darstellung ---------- */
 function applyTheme(){
@@ -222,7 +223,7 @@ function applyRoute(r){
   R.route = r;
   showPage(S.mode === 'error' ? 'error' : r.page);
   if (r.page === 'bike') { $$('#v-bike .sub').forEach(s => { s.hidden = s.id !== 'v-' + r.section; }); }
-  if (r.page === 'data') { Promise.all([data.refreshStorage(), data.refreshPoints()]).then(() => { if (R.route.page === 'data') data.renderData(); }); }
+  if (r.page === 'data') { Promise.all([data.refreshStorage(), data.refreshPoints(), filebk.refresh()]).then(() => { if (R.route.page === 'data') data.renderData(); }); }   /* ab 1.11.0: Dateistatus erst hier (nicht beim Start) */
   renderAll();
   if (invTo && invTo !== invFrom) { window.scrollTo(0, 0); const h = document.getElementById('partDetailTitle'); if (h) h.focus({preventScroll: true}); }
   else if (invTo === '' && invFrom) { window.scrollTo(0, S.invScroll || 0); const c = document.querySelector('[data-partview="' + CSS.escape(invFrom) + '"]'); if (c) c.focus({preventScroll: true}); }
@@ -461,6 +462,9 @@ async function boot(){
   registerSW();
   /* ab 1.10.0 (Issue #18): automatische Wiederherstellungspunkte; nach jedem Lauf die Anzeige auffrischen */
   points.onRun(() => { if (R.route.page === 'data') data.refreshPoints().then(ch => { if (ch && R.route.page === 'data') data.renderData(); }); });
+  /* ab 1.11.0 (Issue #18 Teil 2): nach jedem Lauf der Punkte die gewählte Sicherungsdatei aktualisieren (nur wenn eingerichtet) */
+  points.onRun(() => filebk.auto());
+  filebk.onChange(() => data.refreshMeta().then(() => { if (R.route.page === 'data' && !data.pointsDirty()) return; scheduleRender(); }));
   points.initPoints();
 }
 boot();
