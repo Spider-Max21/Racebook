@@ -16,6 +16,7 @@ import * as data from './views/data.js';
 import * as counter from './views/counter.js';
 import * as drafts from './drafts.js';
 import * as nav from './navigation.js';
+import * as points from './points.js';
 
 /* ---------- Darstellung ---------- */
 function applyTheme(){
@@ -120,7 +121,7 @@ function renderSys(){
   if (S.otherTab) parts.push('<p><b>Racebook wurde in einem anderen Fenster aktualisiert.</b> Lade diese Seite neu, bevor du weiter einträgst.</p><button class="mini" type="button" id="reloadBtn">Neu laden</button>');
   if (S.slowWrite) parts.push('<p><b>Speichern dauert ungewöhnlich lange.</b> Vermutlich ist Racebook noch in einem anderen Tab oder Fenster offen, zum Beispiel in Chrome, und blockiert den Speicher. Schließ Racebook dort, dann geht es hier von selbst weiter.</p>');
   if (S.blocked) parts.push('<p><b>Racebook wird aktualisiert.</b> Bitte schließ andere geöffnete Racebook-Fenster oder -Tabs, dann geht es weiter.</p>');
-  if (S.replaced) parts.push('<p><b>Die Daten wurden in einem anderen Fenster ersetzt</b> (' + (S.replaced.how || 'Sicherung eingespielt oder Sicherheitskopie zurückgeholt') + '). Du siehst jetzt den neuen Stand.'
+  if (S.replaced) parts.push('<p><b>Die Daten wurden in einem anderen Fenster ersetzt</b> (' + (S.replaced.how || 'Sicherung eingespielt, Sicherheitskopie oder Wiederherstellungspunkt zurückgeholt') + '). Du siehst jetzt den neuen Stand.'
     + (S.replaced.drafts ? ' Offene Eingaben in diesem Fenster wurden geschlossen, weil sie zum vorherigen Stand gehörten.' : '') + (S.replaced.unres ? ' Ungeklärte Speicherversuche des vorherigen Stands sind damit hinfällig.' : '') + '</p><button class="mini" type="button" id="replacedOk">Verstanden</button>');
   const orph = orphanCount();
   if (orph && R.route.page !== 'data') parts.push('<p><b>' + (orph === 1 ? 'Ein Eintrag gehört' : orph + ' Einträge gehören') + ' zu keinem Motorrad.</b> Unter „Daten &amp; Sicherung“ kannst du sie einem Motorrad zuordnen oder löschen.</p><button class="mini" type="button" data-nav="data">Ansehen</button>');
@@ -136,7 +137,7 @@ function orphanCount(){
   return ['log', 'rides', 'setups', 'defects'].reduce((n, c) => n + S[c].filter(x => !has(x.bike)).length, 0) + S.parts.filter(p => p.bike !== 'both' && p.bike !== 'some' && !has(p.bike)).length;
 }
 
-/* ---------- Bestand ersetzt (Sicherung eingespielt, Sicherheitskopie zurückgeholt, anderes Fenster) ----------
+/* ---------- Bestand ersetzt (Sicherung eingespielt, Sicherheitskopie oder Wiederherstellungspunkt zurückgeholt, anderes Fenster) ----------
    Alles, was zum vorherigen Bestand gehört, wird hier geschlossen: Formulare, Entwürfe, Schnell-Eintrag,
    Bearbeiten-Ansichten, offene Vorgänge. Laufende Schreibvorgänge des alten Bestands weist der Speicher ab.
    Auch bei gleichen Motorrad-IDs bleibt nichts Altes zum erneuten Speichern stehen. */
@@ -221,7 +222,7 @@ function applyRoute(r){
   R.route = r;
   showPage(S.mode === 'error' ? 'error' : r.page);
   if (r.page === 'bike') { $$('#v-bike .sub').forEach(s => { s.hidden = s.id !== 'v-' + r.section; }); }
-  if (r.page === 'data') { data.refreshStorage().then(() => { if (R.route.page === 'data') data.renderData(); }); }
+  if (r.page === 'data') { Promise.all([data.refreshStorage(), data.refreshPoints()]).then(() => { if (R.route.page === 'data') data.renderData(); }); }
   renderAll();
   if (invTo && invTo !== invFrom) { window.scrollTo(0, 0); const h = document.getElementById('partDetailTitle'); if (h) h.focus({preventScroll: true}); }
   else if (invTo === '' && invFrom) { window.scrollTo(0, S.invScroll || 0); const c = document.querySelector('[data-partview="' + CSS.escape(invFrom) + '"]'); if (c) c.focus({preventScroll: true}); }
@@ -314,7 +315,12 @@ function onData(key, arr){
 let renderQ = 0;
 function scheduleRender(){ if (renderQ) return; renderQ = requestAnimationFrame(() => { renderQ = 0; renderAll(); }); }
 let metaQ = 0;
-DB.onChange(() => { clearTimeout(metaQ); metaQ = setTimeout(() => Promise.all([data.refreshMeta(), nav.refreshPreferences()]).then(scheduleRender), 30); });
+DB.onChange(stores => {
+  /* ab 1.10.0: nur der Speicherbereich der Punkte und der Sicherheitskopie geändert (dieses oder ein anderes Fenster): Verwaltungsdaten
+     neu lesen, die Seite „Daten & Sicherung“ nur neu zeichnen, wenn sich ihre Anzeige ändert */
+  if (stores.size === 1 && stores.has('snapshots')) { data.refreshMeta().then(() => { if (R.route.page === 'data' && data.pointsDirty()) data.renderData(); }); return; }
+  clearTimeout(metaQ); metaQ = setTimeout(() => Promise.all([data.refreshMeta(), nav.refreshPreferences()]).then(scheduleRender), 30);
+});
 
 /* ---------- Ereignisse ---------- */
 /* Ein weiteres Formular aufklappen = neuer Bearbeitungsvorgang: bei ungespeicherten Eingaben in einem anderen erst fragen */
@@ -453,6 +459,9 @@ async function boot(){
   applyRoute(first);
   sweepOrphans();
   registerSW();
+  /* ab 1.10.0 (Issue #18): automatische Wiederherstellungspunkte; nach jedem Lauf die Anzeige auffrischen */
+  points.onRun(() => { if (R.route.page === 'data') data.refreshPoints().then(ch => { if (ch && R.route.page === 'data') data.renderData(); }); });
+  points.initPoints();
 }
 boot();
 

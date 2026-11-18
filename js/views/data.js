@@ -1,5 +1,7 @@
 /* Racebook – Daten & Sicherung: Sicherung erstellen und einspielen, Sicherheitskopie, Übernahme der
-   bisherigen Version, Speicherzustand, Darstellung, App-Version. */
+   bisherigen Version, Speicherzustand, Darstellung, App-Version.
+   Ab 1.10.0 (Issue #18): automatische Wiederherstellungspunkte auf diesem Gerät (points.js) getrennt von der Sicherung
+   außerhalb der App; Einrichtung (dauerhaft speichern) in derselben Karte. */
 import {esc, fmtDate, fmt} from '../util.js';
 import {S, COLLS, allLoaded, lsGet, lsSet, bikeList} from '../state.js';
 import * as DB from '../db.js';
@@ -10,6 +12,7 @@ import {sweepOrphans, waitIdle, cleanupFiles, payloadFiles} from '../ops.js';
 import {$, toast, errText, arm, fmtSize, icon} from '../ui.js';
 import {R} from '../registry.js';
 import * as ocr from '../ocr.js';
+import {listPoints, restorePoint} from '../points.js';
 
 const SRC = {zip: 'ZIP-Sicherung von Racebook', v8: 'Sicherung aus der bisherigen Racebook-App (JSON)', 'v8-local': 'bisherige Racebook-Version auf diesem Gerät'};
 
@@ -24,7 +27,18 @@ export async function refreshMeta(){
     S.backup = mine ? backup : null; S.backupForeign = !mine;
     S.migration = mig; S.lastImport = last;
     S.snapshot = await snapshotInfo();
+    if (R.route && R.route.page === 'data') S.points = await listPoints();
   } catch (e) {}
+}
+/* ab 1.10.0: Wiederherstellungspunkte für die Anzeige neu lesen. Ergebnis: true, wenn sich gegenüber der zuletzt gezeigten
+   Karte etwas geändert hat (nur dann neu zeichnen; ein Lauf ohne neuen Punkt ändert die Seite nicht) */
+let pointsShown = '';
+const pointsSig = () => JSON.stringify([S.points || null, S.pointRun || null, S.snapshot || null, S.epoch || '', S.changeSeq || 0]);
+export const pointsDirty = () => pointsSig() !== pointsShown;
+export async function refreshPoints(){
+  if (!DB.isOpen()) return false;
+  try { S.points = await listPoints(); } catch (e) {}
+  return pointsDirty();
 }
 export async function refreshStorage(){
   try {
@@ -44,6 +58,39 @@ function backupStatus(){
   return '<dl class="kv"><dt>Letzte Sicherung</dt><dd>' + esc(fmtWhen(b.at)) + '</dd><dt>Datei</dt><dd>' + esc(b.name || '–') + (b.size ? ' (' + fmtSize(b.size) + ')' : '') + '</dd><dt>Vorgang</dt><dd>' + how + '</dd>'
     + '<dt>Seitdem</dt><dd>' + (n > 0 ? '<b class="txt-warn">' + n + (n === 1 ? ' Änderung' : ' Änderungen') + '</b>' : 'keine Änderungen') + '</dd></dl>'
     + '<p class="hint">Racebook weiß nur, dass die Datei erstellt wurde. Ob sie noch in deinen Downloads, deiner Cloud oder auf dem PC liegt, kann die App nicht prüfen.</p>';
+}
+/* ab 1.10.0 (Issue #18): automatische Wiederherstellungspunkte auf diesem Gerät */
+const POINT_ERR = {quota_exceeded: 'Der Speicher auf diesem Gerät ist voll.', aborted: 'Der Schreibvorgang wurde unterbrochen.', closed: 'Der Speicher war gerade nicht erreichbar.'};
+function pointsHTML(){
+  const ps = S.points || [], ok = ps.filter(p => p.ok), last = ok[0], broken = ps.length - ok.length, run = S.pointRun;
+  const cur = p => p.epoch === (S.epoch || '') && p.changeSeq === (S.changeSeq || 0);
+  let h = '<div class="bk-part" id="pointsBox"><h3>Automatisch auf diesem Gerät</h3>';
+  h += last ? '<p id="pointStatus">Letzter Wiederherstellungspunkt: <b>' + esc(fmtWhen(last.created)) + '</b>, geprüft' + (cur(last) ? ', entspricht dem jetzigen Stand' : '') + '. ' + (ok.length === 1 ? 'Ein Punkt' : ok.length + ' Punkte') + ' vorhanden.</p>'
+    : '<p id="pointStatus">Noch kein Wiederherstellungspunkt. Racebook legt ihn nach der nächsten gespeicherten Änderung automatisch an.</p>';
+  /* ab Prüfbefund PR #24: fehlten beim Anlegen schon Fotos oder PDFs, ist der Punkt unvollständig – offen sagen, den letzten vollständigen nennen */
+  if (last && last.missing) {
+    const full = ok.find(p => !p.missing);
+    h += '<p class="warnbox" id="pointIncomplete"><b>Der letzte Punkt ist unvollständig:</b> ' + (last.missing === 1 ? 'Ein Foto oder PDF fehlte' : last.missing + ' Fotos oder PDFs fehlten') + ' beim Anlegen schon im Speicher und ' + (last.missing === 1 ? 'ist' : 'sind') + ' darin nicht enthalten. '
+      + (full ? 'Letzter vollständiger Punkt: ' + esc(fmtWhen(full.created)) + '. Unvollständige Punkte verdrängen keine vollständigen.' : 'Es gibt keinen vollständigen Punkt.') + '</p>';
+  }
+  if (run && (run.result === 'error' || run.result === 'bad') && (!last || run.at > last.created))
+    h += '<p class="warnbox" id="pointFail"><b>Der letzte automatische Punkt (' + esc(fmtWhen(run.at)) + ') wurde nicht angelegt:</b> ' + esc(run.result === 'bad' ? 'Beim Nachprüfen gab es eine Abweichung. ' + (run.reason || '') : (POINT_ERR[run.code] || errText({code: run.code})))
+      + (last ? ' Der vorherige geprüfte Punkt bleibt erhalten.' : '') + ' Deine Daten selbst sind davon nicht betroffen.</p>';
+  if (broken) h += '<p class="warnbox">' + (broken === 1 ? 'Ein Punkt ist beschädigt und wird' : broken + ' Punkte sind beschädigt und werden') + ' nicht verwendet.</p>';
+  h += '<p class="hint">Hilft bei versehentlichem Löschen oder falschem Einspielen. Racebook behält die drei neuesten Punkte und je Tag der letzten 7 Tage den letzten. Die Punkte liegen im selben Browserspeicher wie deine Daten: Löschst du die Website-Daten, entfernst die App oder wechselst das Handy, sind sie mit weg. Dafür ist die Sicherung außerhalb der App da.</p>';
+  if (ok.length) h += '<details id="pointDetails"' + (S.pointsOpen ? ' open' : '') + '><summary>Wiederherstellen …</summary><ul class="plist" id="pointList">'
+    + ok.map(p => '<li><p><b>' + esc(fmtWhen(p.created)) + '</b>' + (cur(p) ? ' (jetziger Stand)' : p.epoch !== (S.epoch || '') ? ' (vor dem letzten Ersetzen)' : '') + '<br>' + esc(countText(p.counts)) + ', ' + p.files + (p.files === 1 ? ' Datei' : ' Dateien')
+      + (p.bikes.length ? '<br>' + esc(p.bikes.join('; ')) : '') + (p.missing ? '<br><span class="txt-warn">Unvollständig: ' + (p.missing === 1 ? 'ein Foto oder PDF fehlte' : p.missing + ' Fotos oder PDFs fehlten') + ' schon beim Anlegen.</span>' : '') + '</p><div class="row"><button class="mini" type="button" data-pointrestore="' + esc(p.id) + '" data-arm="Alle Daten durch diesen Stand ersetzen?"' + (S.importBusy ? ' disabled' : '') + '>Diesen Stand wiederherstellen</button></div></li>').join('')
+    + '</ul><p class="hint">Dabei werden alle Daten auf diesem Gerät durch den gewählten Stand ersetzt. Der jetzige Stand wird vorher zur Sicherheitskopie, du kannst also zurücktauschen.</p></details>';
+  return h + '</div>';
+}
+function setupHTML(){
+  const pers = S.persisted === true ? '<b>Dauerhaft speichern:</b> eingerichtet. Der Browser löscht die Daten nicht von selbst.'
+    : S.persisted === false ? '<b>Dauerhaft speichern:</b> noch nicht eingerichtet. Bei sehr knappem Speicher darf der Browser die Daten sonst löschen.'
+    : '<b>Dauerhaft speichern:</b> wird von diesem Browser nicht unterstützt.';
+  return '<div class="bk-part" id="setupBox"><h3>Einrichtung</h3><p id="persistState">' + pers + '</p>'
+    + (S.persisted === false ? '<div class="row"><button class="btn" type="button" id="persistBtn">Dauerhaft speichern</button></div><p class="hint">Ob der Browser zustimmt, entscheidet er selbst. Chrome stimmt meist zu, wenn Racebook auf dem Startbildschirm installiert ist.</p>' : '')
+    + '<p class="hint">Weitere Freigaben braucht Racebook nicht: Fotos nimmst du über die Kamera- oder Bildauswahl des Geräts auf, ein Mikrofon nutzt Racebook nicht.</p></div>';
 }
 function previewHTML(d){
   const cur = {}; COLLS.forEach(k => { cur[k] = k === 'bikes' ? bikeList().length : S[k].length; });
@@ -106,30 +153,33 @@ function orphanHTML(){
 function storageHTML(){
   const e = S.estimate, fs = S.fileStats || {count: 0, size: 0};
   const pers = S.persisted === true ? 'Ja. Der Browser löscht die Daten nicht von selbst, auch wenn der Speicher knapp wird.'
-    : S.persisted === false ? 'Nein. Bei sehr knappem Speicher darf der Browser die Daten löschen. Installiere die App oder tippe auf „Dauerhaft speichern“.'
+    : S.persisted === false ? 'Nein. Bei sehr knappem Speicher darf der Browser die Daten löschen. Installiere die App oder tippe oben unter „Einrichtung“ auf „Dauerhaft speichern“.'
     : 'Unbekannt (vom Browser nicht unterstützt).';
   const pct = e && e.quota ? Math.round(e.usage / e.quota * 1000) / 10 : null;
   return '<section class="card"><h2>Speicher auf diesem Gerät</h2><dl class="kv">'
     + '<dt>Belegt</dt><dd>' + (e ? fmtSize(e.usage) + ' von etwa ' + fmtSize(e.quota) + (pct != null ? ' (' + String(pct).replace('.', ',') + ' %)' : '') : 'unbekannt') + '</dd>'
     + '<dt>Fotos & PDFs</dt><dd>' + fs.count + ' Dateien, ' + fmtSize(fs.size) + '</dd>'
     + '<dt>Dauerhaft</dt><dd>' + pers + '</dd></dl>'
-    + '<div class="row">' + (S.persisted === false ? '<button class="btn" type="button" id="persistBtn">Dauerhaft speichern</button>' : '') + '<button class="btn ghost" type="button" id="sweepBtn">Speicher aufräumen</button></div>'
+    + '<div class="row"><button class="btn ghost" type="button" id="sweepBtn">Speicher aufräumen</button></div>'
     + '<p class="warnbox"><b>Wichtig:</b> Racebook speichert alles nur in diesem Browser auf diesem Gerät. Wenn du die Website-Daten löschst (auch über „Browserverlauf löschen“ samt Website-Daten), die App samt Daten entfernst oder das Handy wechselst, sind die Daten weg, außer in einer Sicherung.</p></section>';
 }
 
 export function renderData(){
   const el = $('#dataBody'); if (!el) return;
+  const pd = document.getElementById('pointDetails'); if (pd) S.pointsOpen = pd.open;
+  /* ab 1.10.0: eingefügter, noch nicht geprüfter Sicherungstext bleibt beim Neuzeichnen erhalten */
+  const pasteEl = document.getElementById('importPaste'), paste = pasteEl ? pasteEl.value : '';
   if (S.mode !== 'ready') { el.innerHTML = '<p class="hint thinking">Speicher wird geladen …</p>'; return; }
   const has = bikeList().length > 0 || S.parts.length > 0 || !!S.navigation;
   const parts = [];
   parts.push('<section class="card"><h2>Einstellungen</h2><p class="hint">Darstellung, Menü und Sicherung für die ganze App.</p><div class="row"><button class="btn" type="button" data-nav="navigation">Menü anpassen</button><button class="btn ghost" type="button" data-settingsjump="appearanceCard">Darstellung</button><button class="btn ghost" type="button" data-settingsjump="bkCard">Daten &amp; Sicherung</button></div></section>');
   const th = lsGet('theme') || 'system';
   parts.push('<section class="card" id="appearanceCard"><h2>Darstellung</h2><div class="f"><label for="themeSel">Farbschema</label><select id="themeSel"><option value="system"' + (th === 'system' ? ' selected' : '') + '>wie das Gerät</option><option value="dark"' + (th === 'dark' ? ' selected' : '') + '>dunkel</option><option value="light"' + (th === 'light' ? ' selected' : '') + '>hell</option></select></div></section>');
-  parts.push('<section class="card" id="bkCard"><h2>Sicherung</h2>' + backupStatus()
+  parts.push('<section class="card" id="bkCard"><h2>Sicherung</h2>' + pointsHTML() + '<div class="bk-part" id="outsideBox"><h3>Außerhalb der App</h3>' + backupStatus()
     + '<div class="row"><button class="btn primary" type="button" id="exportBtn"' + (allLoaded() && has && !S.exporting ? '' : ' disabled') + '>' + icon('save') + (S.exporting ? 'Wird erstellt …' : 'Sicherung herunterladen') + '</button>'
     + (navigator.canShare ? '<button class="btn" type="button" id="shareBtn"' + (allLoaded() && has && !S.exporting ? '' : ' disabled') + '>' + icon('share') + 'Sicherung teilen …</button>' : '') + '</div>'
     + '<div id="exportOut">' + (S.shareReady ? '<p class="hint">Sicherung ist bereit: ' + esc(S.shareReady.name) + ' (' + fmtSize(S.shareReady.blob.size) + ').</p><div class="row"><button class="btn primary" type="button" id="shareNow">Jetzt teilen</button></div>' : '') + '</div>'
-    + '<p class="hint">Die Sicherung ist eine ZIP-Datei mit allen Einträgen, Fotos und PDFs. Bewahre eine Kopie außerhalb des Handys auf, zum Beispiel in deiner Cloud oder auf dem PC.</p></section>');
+    + '<p class="hint">Die Sicherung ist eine ZIP-Datei mit allen Einträgen, Fotos und PDFs. Bewahre eine Kopie außerhalb des Handys auf, zum Beispiel in deiner Cloud oder auf dem PC. Nur sie schützt, wenn die Website-Daten gelöscht werden oder das Handy verloren geht.</p></div>' + setupHTML() + '</section>');
   parts.push('<section class="card" id="importCard"><h2>Sicherung einspielen</h2>'
     + (S.importDraft ? previewHTML(S.importDraft)
       : '<p class="hint">ZIP-Sicherung von Racebook oder JSON-Sicherung aus der bisherigen Racebook-App in Claude. Vor dem Einspielen siehst du, was drin ist.</p>'
@@ -151,6 +201,8 @@ export function renderData(){
   parts.push('<section class="card"><h2>App</h2><dl class="kv"><dt>Version</dt><dd>' + APP_VERSION + '</dd><dt>Offline</dt><dd>' + sw + '</dd></dl><div class="row"><button class="btn ghost" type="button" id="updateCheck">Nach Aktualisierung suchen</button><a class="btn ghost" href="#/hilfe" data-nav="help">Hilfe</a></div></section>');
   parts.push(ocrHTML());
   el.innerHTML = parts.join('');
+  pointsShown = pointsSig();
+  if (paste) { const n = document.getElementById('importPaste'); if (n && !n.value) n.value = paste; }
   if (S.ocrReady == null) ocr.offlineReady().then(v => { S.ocrReady = v; if (v) renderData(); });
 }
 /* Texterkennung für „Artikel aus einem Foto“ (ab 1.4.0): läuft auf dem Gerät; einmal laden, dann auch offline */
@@ -272,6 +324,19 @@ export async function onClick(t){
     catch (e) { toast((e && e.user ? e.message : errText(e)) + (e && e.committed ? resetNote() : ' Es wurde nichts verändert.')); }
     S.importBusy = false;
     await refreshMeta(); R.renderAll();
+    return true;
+  }
+  if (t.dataset.pointrestore) {
+    if (!arm(t)) return true;
+    if (S.importBusy) return true;
+    const id = t.dataset.pointrestore;
+    S.importBusy = true; S.lastReset = null; S.pointsOpen = true; renderData();
+    try {
+      const r = await replaceGuarded('restore', () => restorePoint(id));
+      toast('Wiederherstellungspunkt vom ' + fmtWhen(r.created) + ' zurückgeholt und geprüft: ' + countText(r.counts) + '.' + (r.missing ? ' Unvollständig: ' + (r.missing === 1 ? 'ein Foto oder PDF fehlte' : r.missing + ' Fotos oder PDFs fehlten') + ' schon beim Anlegen des Punkts und ' + (r.missing === 1 ? 'fehlt' : 'fehlen') + ' weiterhin.' : '') + ' Der vorherige Stand ist jetzt die Sicherheitskopie.' + resetNote());
+    } catch (e) { toast((e && e.user ? e.message : errText(e) + ' Es wurde nichts verändert.') + (e && e.committed ? resetNote() : '')); }
+    S.importBusy = false;
+    await refreshMeta(); await refreshPoints(); R.renderAll();
     return true;
   }
   if (t.dataset.orphanmove) {

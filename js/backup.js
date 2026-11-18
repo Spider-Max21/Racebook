@@ -9,13 +9,13 @@ import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans,
 import {COLLS} from './state.js';
 import {pad, canon, isISO, fmtDate} from './util.js';
 
-export const APP_VERSION = '1.9.1';
+export const APP_VERSION = '1.10.0';
 export const V8_LOCAL_KEY = 'wh-garage-local';
 const MAX_JSON = 60 * 1024 * 1024;
 const enc = new TextEncoder();
 const err = msg => { const e = new Error(msg); e.user = true; return e; };
 
-const toNext = recs => { const n = {}; COLLS.forEach(c => { n[c] = {}; (recs[c] || []).forEach(d => { n[c][d.id] = d; }); }); return n; };
+export const toNext = recs => { const n = {}; COLLS.forEach(c => { n[c] = {}; (recs[c] || []).forEach(d => { n[c][d.id] = d; }); }); return n; };
 export const refsOf = recs => new Set(fileRefs(toNext(recs)).keys());
 
 function stamp(d){

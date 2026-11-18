@@ -433,7 +433,7 @@ export function replaceAll(next, files, info){
           const fileIds = info.refsOf ? Array.from(info.refsOf(old)) : [];
           const snap = {id: 'vor-ersetzen', created: Date.now(), reason: info.reason || 'Ersetzen', data: old, navigation: oldNavigation, fileIds};
           snapStore.put(snap); res.snapshot = {created: snap.created, counts: REC.reduce((a, s) => { a[s] = old[s].length; return a; }, {})};
-        } else if (info.dropSnapshot) snapStore.clear();
+        } else if (info.dropSnapshot) snapStore.delete('vor-ersetzen');   /* ab 1.10.0: Wiederherstellungspunkte bleiben */
         let n = 0;
         REC.forEach(s => tx.objectStore(s).clear());
         for (const s of REC) {
@@ -468,6 +468,106 @@ export function replaceAll(next, files, info){
 /* Sicherheitskopie zurückholen: der aktuelle Stand wird dabei selbst zur Kopie (Tausch). */
 export async function getSnapshot(){ return (await get('snapshots', 'vor-ersetzen')) || null; }
 export function dropSnapshot(){ return commit([{store: 'snapshots', type: 'del', id: 'vor-ersetzen'}], {bump: false}); }
+
+/* ---------- Wiederherstellungspunkte (ab 1.10.0, Issue #18) ----------
+   Liegen im Speicherbereich 'snapshots' neben der Sicherheitskopie ('vor-ersetzen'), Kennung 'punkt-…'. Ein Punkt enthält
+   alle gespeicherten Einträge, die Menübelegung, Bestandskennung und Änderungszähler sowie die Liste der verwendeten Dateien
+   (Kennung, Größe, Prüfsumme). Die Dateien selbst bleiben einmal gespeichert; releaseFiles räumt keine Datei auf, die ein
+   Eintrag dieses Bereichs nennt. Gelesen und abgelegt wird in einer einzigen Transaktion: ein Punkt zeigt immer einen ganzen
+   Stand, auch wenn ein anderes Fenster gleichzeitig speichert oder eine Sicherung einspielt (die Vorgänge laufen nacheinander).
+   Ein neuer Punkt gilt erst nach dem Zurücklesen und Prüfen als geprüft (confirmPoint); erst dann werden ältere entfernt. */
+/* Ein nicht geprüfter Punkt, der älter ist, stammt aus einem abgebrochenen Vorgang (App beendet zwischen Ablegen und Prüfen) und
+   wird ersetzt; jünger gilt er als noch laufende Prüfung (anderes Fenster) und wird nicht doppelt angelegt. */
+export const POINT_STALE = 2 * 60000;
+const staleMs = () => { const t = T(); return t && typeof t.pointStale === 'number' ? t.pointStale : POINT_STALE; };
+export const isPoint = s => !!s && s.kind === 'punkt' && typeof s.id === 'string' && s.id.slice(0, 6) === 'punkt-';
+const tellPoints = () => {
+  changeCbs.forEach(cb => cb(new Set(['snapshots']), 'local'));
+  try { if (chan) chan.postMessage({stores: ['snapshots']}); } catch (e) {}
+};
+/* opts: {refsOf, minGap (ms seit dem letzten Punkt dieses Bestands), now}
+   Ergebnis: {result: 'new', point} | 'same' (dieser Stand hat schon einen Punkt) | 'wait' (next: frühester Zeitpunkt) | 'empty' */
+export function takePoint(opts){
+  opts = opts || {};
+  return new Promise((resolve, reject) => {
+    let tx;
+    try { tx = txOf(REC.concat(['files', 'meta', 'snapshots']), 'readwrite'); } catch (e) { reject(mapErr(e)); return; }
+    const t = T();
+    let injected = null, done = false, res = null;
+    tx.oncomplete = () => { done = true; resolve(res); };
+    tx.onabort = () => { if (!done) reject(injected || mapErr(tx.error || {name: 'AbortError'})); };
+    const data = {};
+    let info = null, nav = null, snaps = [], files = [], pending = REC.length + 4;
+    REC.forEach(s => { const r = tx.objectStore(s).getAll(); r.onsuccess = () => { data[s] = r.result; step(); }; });
+    const ri = tx.objectStore('meta').get('info'); ri.onsuccess = () => { info = ri.result || null; step(); };
+    const rn = tx.objectStore('meta').get('navigation'); rn.onsuccess = () => { nav = rn.result || null; step(); };
+    const rs = tx.objectStore('snapshots').getAll(); rs.onsuccess = () => { snaps = rs.result; step(); };
+    const rf = tx.objectStore('files').getAll(); rf.onsuccess = () => { files = rf.result; step(); };
+    function step(){
+      if (--pending) return;
+      try {
+        const now = opts.now || Date.now();
+        const epoch = info && typeof info.epoch === 'string' ? info.epoch : '';
+        const seq = info ? info.changeSeq || 0 : 0;
+        if (!REC.some(s => data[s].length) && !nav) { res = {result: 'empty'}; return; }
+        const mine = snaps.filter(s => isPoint(s) && s.epoch === epoch).sort((a, b) => b.created - a.created);
+        /* Derselbe Stand (z. B. aus einem anderen Fenster schon abgelegt): kein zweiter Punkt */
+        const stale = staleMs();
+        const same = mine.find(s => s.changeSeq === seq && canon(s.navigation || null) === canon(nav) && (s.verified || now - s.created < stale));
+        /* ab Prüfbefund PR #24: ein noch nicht geprüfter Punkt desselben Stands → 'pending' mit Zeitpunkt, ab dem er als liegengeblieben gilt */
+        if (same) { res = same.verified ? {result: 'same'} : {result: 'pending', next: same.created + stale}; return; }
+        /* Mindestabstand ab dem letzten geprüften oder noch laufenden Punkt; ein liegengebliebener (ungeprüft, älter als die Frist)
+           zählt nicht, sonst würde sein Ersatz um den ganzen Abstand verzögert (Prüfbefund PR #24) */
+        const live = mine.filter(s => s.verified || now - s.created < stale);
+        if (live[0] && opts.minGap && now - live[0].created < opts.minGap) { res = {result: 'wait', next: live[0].created + opts.minGap}; return; }
+        const fmap = new Map(files.map(f => [f.id, f]));
+        const used = Array.from(opts.refsOf ? opts.refsOf(data) : []).sort();
+        const fl = [], missing = [];
+        used.forEach(id => { const f = fmap.get(id); if (f && f.blob instanceof Blob) fl.push({id, size: f.blob.size, sha256: typeof f.sha256 === 'string' ? f.sha256 : ''}); else missing.push(id); });
+        const p = {id: 'punkt-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 8), kind: 'punkt', created: now, epoch, changeSeq: seq,
+          data, navigation: nav, fileIds: fl.map(f => f.id), files: fl, missing, verified: false, sum: ''};
+        if (t && t.pointQuota) { if (t.pointQuota !== 'always') t.pointQuota = false; injected = {code: 'quota_exceeded', message: 'Test: Speicher voll'}; tx.abort(); return; }
+        if (t && t.pointAbort) { t.pointAbort = false; injected = {code: 'aborted', message: 'Test: Schreibvorgang unterbrochen'}; tx.abort(); return; }
+        tx.objectStore('snapshots').put(p);
+        res = {result: 'new', point: p};
+      } catch (e) { injected = mapErr(e); try { tx.abort(); } catch (_) {} }
+    }
+  });
+}
+/* Punkt als geprüft vermerken und in derselben Transaktion die Aufbewahrung anwenden (keep: Liste geprüfter Punkte →
+   Kennungen, die bleiben; je Punkt mit complete = keine Datei fehlte beim Anlegen). Nicht geprüfte Punkte, die älter als
+   POINT_STALE sind, stammen aus abgebrochenen Vorgängen. */
+export function confirmPoint(id, sum, keep, now){
+  return new Promise((resolve, reject) => {
+    let tx;
+    try { tx = txOf(['snapshots'], 'readwrite'); } catch (e) { reject(mapErr(e)); return; }
+    const res = {result: 'ok', removed: []};
+    let done = false;
+    tx.oncomplete = () => { done = true; resolve(res); tellPoints(); };
+    tx.onabort = () => { if (!done) reject(mapErr(tx.error || {name: 'AbortError'})); };
+    const st = tx.objectStore('snapshots'), r = st.getAll();
+    r.onsuccess = () => {
+      const all = r.result.filter(isPoint), me = all.find(p => p.id === id);
+      if (!me) { res.result = 'gone'; return; }
+      me.verified = true; me.sum = sum; st.put(me);
+      now = now || Date.now();
+      const ok = all.filter(p => p.verified);
+      const stay = new Set(keep(ok.map(p => ({id: p.id, created: p.created, complete: !(p.missing && p.missing.length)}))));
+      stay.add(id);
+      all.forEach(p => { if ((p.verified && !stay.has(p.id)) || (!p.verified && p.id !== id && now - p.created > staleMs())) { st.delete(p.id); res.removed.push(p.id); } });
+    };
+  });
+}
+export function dropPoint(id){
+  return new Promise((resolve, reject) => {
+    let tx;
+    try { tx = txOf(['snapshots'], 'readwrite'); } catch (e) { reject(mapErr(e)); return; }
+    tx.oncomplete = () => { resolve(true); tellPoints(); };
+    tx.onabort = () => reject(mapErr(tx.error || {name: 'AbortError'}));
+    tx.objectStore('snapshots').delete(id);
+  });
+}
+export async function getPoints(){ return (await getAll('snapshots')).filter(isPoint); }
 
 export async function estimate(){
   try { if (navigator.storage && navigator.storage.estimate) return await navigator.storage.estimate(); } catch (e) {}

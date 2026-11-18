@@ -114,6 +114,14 @@ legend{font:700 15px var(--f-cond);font-stretch:condensed;color:var(--muted);pad
 input[aria-invalid="true"],select[aria-invalid="true"],textarea[aria-invalid="true"]{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
 .warnbox{border:1px solid color-mix(in srgb,var(--warn) 55%,var(--line));background:color-mix(in srgb,var(--warn) 10%,var(--surface));border-radius:var(--r-s);padding:10px 12px;font-size:14.5px}
 .warnbox ul{margin:6px 0;padding-left:20px}
+/* ab 1.10.0 (Issue #18): Sicherungskarte in drei Teilen, Liste der Wiederherstellungspunkte */
+.bk-part{border-top:1px solid var(--line);padding-top:10px;margin-top:12px}
+.bk-part:first-of-type{border-top:0;padding-top:0;margin-top:4px}
+.bk-part h3{font-size:16px;margin:0 0 6px}
+.plist{list-style:none;margin:8px 0;padding:0;display:grid;gap:8px}
+.plist li{border:1px solid var(--line);border-radius:var(--r-s);padding:8px 10px}
+.plist li p{margin:0 0 6px;overflow-wrap:anywhere}
+#pointDetails summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600}
 
 details.form-card>summary{list-style:none;display:flex;justify-content:space-between;align-items:center;cursor:pointer;min-height:44px}
 details.form-card>summary::-webkit-details-marker{display:none}
