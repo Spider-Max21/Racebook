@@ -18,6 +18,7 @@ import * as mounts from '../mounts.js';
 import * as teile from './teilehistorie.js';
 import * as zub from './zubehoer.js';
 import * as TY from './setup_reifen.js';
+import * as TR from '../tracks.js';
 import * as ocr from '../ocr.js';
 import {parseLabel} from '../label.js';
 import {openCropper} from '../cropper.js';
@@ -1047,6 +1048,12 @@ export function updateRideIn(){
   wrap.hidden = !show;
   if (!show) $('#rIn').checked = false;
 }
+/* ab 1.13.0: bekannte Varianten der eingetragenen Strecke zur Auswahl (aus Fahrten und Bestzeiten aller Motorräder) */
+export function updateRideLayouts(){
+  const el = $('#rLayoutList'), t = $('#rTrack'); if (!el || !t) return;
+  const html = TR.layoutsOf({rides: S.rides, bikes: S.bikes}, t.value).map(x => '<option value="' + esc(x) + '"></option>').join('');
+  if (el.innerHTML !== html) el.innerHTML = html;
+}
 function renderRides(){
   const b = curBike(); if (!b) return;
   const u = U(b);
@@ -1064,6 +1071,7 @@ function renderRides(){
   if (setups.some(s => s.id === prev)) sel.value = prev;
   const tracks = Array.from(new Set(S.rides.map(r => r.track).concat(S.setups.map(s => s.track)).filter(Boolean))).sort();
   $('#trackList').innerHTML = tracks.map(t => '<option value="' + esc(t) + '"></option>').join('');
+  updateRideLayouts();
   const dots = n => n ? '<span class="dots" role="img" aria-label="Gefühl ' + n + ' von 5">' + [1, 2, 3, 4, 5].map(i => '<i class="' + (i <= n ? 'on' : '') + '"></i>').join('') + '</span>' : '';
   $('#rideList').innerHTML = rides.length ? rides.map(r => {
     const s = S.setups.find(x => x.id === r.setupId);
@@ -1071,8 +1079,11 @@ function renderRides(){
     let setupLine = '';
     if (r.setupSnap) setupLine = '<div class="hint">Setup: ' + esc(r.setupSnap.track || (s ? s.track : '') || 'ohne Namen') + '</div>' + (snapText(r.setupSnap) ? '<div class="snap">' + esc(snapText(r.setupSnap)) + '</div>' : '');
     else if (r.setupId) setupLine = '<div class="hint">Setup: ' + esc(s ? s.track : 'gelöscht') + ' (damalige Werte nicht gespeichert)</div>';
+    /* ab 1.13.0: Variante und Turns, wenn angegeben */
+    const more = [r.layout ? 'Variante: ' + r.layout : '', r.turns ? (r.turns === 1 ? '1 Turn' : r.turns + ' Turns') : ''].filter(Boolean).join(' · ');
     return '<div class="entry"><div><div class="entry-date">' + fmtDate(r.date) + '</div><div class="entry-at">' + (r.amount == null ? '' : fmt(r.amount, 2) + '<small> ' + u + '</small>') + '</div></div>'
       + '<div class="entry-body"><div class="entry-title">' + esc(r.track || 'Fahrt') + ' ' + dots(r.feel) + '</div>'
+      + (more ? '<div class="hint ride-more">' + esc(more) + '</div>' : '')
       + (chips ? '<div class="chips">' + chips + '</div>' : '') + setupLine
       + (r.note ? '<div class="entry-note">' + esc(r.note) + '</div>' : '')
       + '<div class="entry-foot"><span></span><button class="mini" type="button" data-del="rides/' + esc(r.id) + '" data-arm="Löschen? Stand wird neu berechnet">Löschen</button></div></div></div>';
@@ -2068,6 +2079,7 @@ export async function onClick(t){
 export function onInput(t){
   if (beleg.onInput(t)) return true;    /* ab 1.6.0: Beleg übernehmen */
   if (S.cap && t.closest && t.closest('#partForm')) stock.onInput(t);
+  if (t.id === 'rTrack') { updateRideLayouts(); return true; }   /* ab 1.13.0: Varianten dieser Strecke */
   if (t.id === 'abModel') {
     const tp = MODEL_TPL[$('#abBrand').value + '|' + t.value.trim().toLowerCase()];
     if (tp && TEMPLATES[tp]) { $('#abTpl').value = tp; $('#abUnit').value = TEMPLATES[tp].unit; }
@@ -2334,6 +2346,8 @@ export async function onSubmit(f, busy){
     const feel = $('input[name="feel"]:checked');
     const rd = {date: fieldDate('rDate', 'Datum', {req: true}), amount: fieldNum('rAmount', U(b) === 'km' ? 'Strecke' : 'Fahrzeit', {req: true, gt: 0, max: lim.ride}),
       track: str($('#rTrack').value).slice(0, 120), ground: $('#rGround').value, weather: $('#rWeather').value, setupId: $('#rSetup').value,
+      /* ab 1.13.0 (Roadmap 8): Streckenvariante und Anzahl der Turns, nur wenn angegeben */
+      layout: str($('#rLayout').value).slice(0, 80), turns: fieldNum('rTurns', 'Turns', {int: true, min: 1, max: 99}),
       feel: feel ? Number(feel.value) : null, inReading: !$('#rInWrap').hidden && $('#rIn').checked, note: str($('#rNote').value).slice(0, 4000)};
     const o = opFor('rideForm', b.id, 'rides', null, canon(rd)); if (o.saving) return true;
     const g = S.gen.rideForm || 0;

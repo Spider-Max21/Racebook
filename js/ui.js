@@ -100,6 +100,8 @@ const P = {
   home: '<path d="M3 10l9-7 9 7M5 9v12h14V9M8 21V12h8v9M8 15h8M8 18h8"/>',
   inventory: '<path d="M3 7l9-4 9 4-9 4zM3 7v11l9 4 9-4V7M12 11v11M7 5l10 4"/>',
   stats: '<path d="M4 20h16M7 20V12M12 20V5M17 20v-9"/>',
+  tracks: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+  flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   components: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v5M12 15v5M4 12h5M15 12h5"/>',
   vehicle: '<path d="M5 3h10l4 4v14H5zM15 3v5h4M8 12h8M8 16h8"/>',
@@ -137,6 +139,8 @@ export const icon = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '" v
 
 /* ---------- Navigation ---------- */
 export const SECTIONS = [['status', 'Übersicht'], ['defects', 'Mängel'], ['log', 'Logbuch'], ['rides', 'Fahrten'], ['setup', 'Setup'], ['components', 'Verbaute Teile'], ['vehicle', 'Fahrzeugdaten'], ['maintenance', 'Wartungsintervalle'], ['manual', 'Handbuch']];
+/* Strecke in einer Adresse: wie ../tracks.js trackKey (Leerzeichen zusammengefasst, Groß-/Kleinschreibung egal) */
+const T_KEY = s => String(s).replace(/\s+/g, ' ').trim().toLocaleLowerCase('de');
 export function parseRoute(h){
   h = String(h == null ? location.hash : h).replace(/^#/, '');
   const p = h.split('/').filter(Boolean).map(x => { try { return decodeURIComponent(x); } catch (e) { return ''; } });
@@ -146,6 +150,7 @@ export function parseRoute(h){
   if (p[0] === 'lager') return p[1] ? {page: 'inventory', part: p[1]} : {page: 'inventory'};   /* ab 1.7.1: Artikeldetails */
   if (p[0] === 'menue') return {page: 'navigation'};
   if (p[0] === 'auswertung') return {page: 'stats'};   /* ab 1.12.0: Kosten und Nutzung */
+  if (p[0] === 'strecken') return p[1] ? {page: 'tracks', track: T_KEY(p[1])} : {page: 'tracks'};   /* ab 1.13.0: Strecken und Bestzeiten */
   if (p[0] === 'einstellungen') return {page: 'data'};
   if (p[0] === 'daten') return {page: 'data'};
   if (p[0] === 'hilfe') return {page: 'help'};
@@ -157,6 +162,7 @@ export function routeHash(r){
   if (r.page === 'inventory') return '#/lager' + (r.part ? '/' + encodeURIComponent(r.part) : '');
   if (r.page === 'navigation') return '#/menue';
   if (r.page === 'stats') return '#/auswertung';
+  if (r.page === 'tracks') return '#/strecken' + (r.track ? '/' + encodeURIComponent(r.track) : '');
   if (r.page === 'data') return '#/einstellungen';
   if (r.page === 'help') return '#/hilfe';
   if (r.page === 'add') return '#/neu';

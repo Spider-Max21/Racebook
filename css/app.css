@@ -678,3 +678,23 @@ body.card-drag{-webkit-user-select:none;user-select:none}
 .stats-list li span{min-width:0;overflow-wrap:anywhere}
 .stats-list b{white-space:nowrap;font-variant-numeric:tabular-nums}
 .stats-range{display:grid;gap:4px}
+
+/* Strecken und Bestzeiten (ab 1.13.0) */
+.track-list,.lap-list,.visit-list{list-style:none;padding:0;margin:0}
+.track-list{display:grid;gap:10px}
+.track-card{overflow-wrap:anywhere}
+.track-h{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.track-h h2{margin:0;min-width:0}
+.track-name{background:none;border:0;padding:6px 0;min-height:44px;font:inherit;font-weight:700;font-size:17px;color:var(--ink);text-align:left;cursor:pointer;text-decoration:underline;text-underline-offset:3px;min-width:0;overflow-wrap:anywhere}
+.fav-btn{display:inline-flex;gap:6px;align-items:center}
+.fav-btn[aria-pressed="true"]{border-color:var(--accent-text)}
+.fav-btn span[aria-hidden]{font-size:16px;line-height:1}
+.track-counts{margin:2px 0}
+.track-best{display:flex;gap:6px;align-items:flex-start;margin-top:6px}
+.track-best .ic{flex:none;width:18px;height:18px;margin-top:2px}
+.lap-group h4{margin:10px 0 4px}
+.lap-row,.visit-row{border-top:1px solid var(--line);padding:10px 0;overflow-wrap:anywhere}
+.lap-row .row{margin-top:8px}
+.lap-h{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.lap-time{font-size:18px;font-variant-numeric:tabular-nums}
+.ride-more{margin-top:2px}

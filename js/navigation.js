@@ -8,7 +8,7 @@ import {$, $$, icon, SECTIONS, toast, errText} from './ui.js';
 import {esc, canon} from './util.js';
 import {R} from './registry.js';
 
-const LABELS = {home:'Garage',inventory:'Lager',stats:'Auswertung',data:'Einstellungen',help:'Hilfe',navigation:'Menü anpassen',...Object.fromEntries(SECTIONS)};
+const LABELS = {home:'Garage',inventory:'Lager',stats:'Auswertung',tracks:'Strecken',data:'Einstellungen',help:'Hilfe',navigation:'Menü anpassen',...Object.fromEntries(SECTIONS)};
 const SHORT = {components:'Verbaut',vehicle:'Fahrzeug',maintenance:'Intervalle'};
 const titleOf = b => b.nickname || ((b.brand || '') + ' ' + (b.model || '')).trim() || 'Motorrad';
 let draft = null, target = '', dragging = null;
@@ -41,7 +41,7 @@ export function renderNavigation(){
 export const pickedBike = () => (S.picked && S.bikes[S.picked]) || null;
 function showMore(){
   const onBike = R.route.page === 'bike', b = onBike ? curBike() : pickedBike();   /* ab 1.7.3: auch auf Lager/Einstellungen das gewählte Motorrad */
-  $('#moreBody').innerHTML = '<h3>Racebook</h3><div class="menu-grid">' + button('home') + button('inventory') + button('stats') + '</div>'
+  $('#moreBody').innerHTML = '<h3>Racebook</h3><div class="menu-grid">' + button('home') + button('inventory') + button('stats') + button('tracks') + '</div>'
     + '<h3>' + esc(b ? titleOf(b) : 'Am Motorrad') + '</h3>' + (!b ? '<p class="hint">Beim Öffnen wählst du das Motorrad.</p>' : !onBike ? '<p class="hint" id="moreBikeHint">Öffnet die Bereiche dieses Motorrads. Ein anderes wählst du in der Garage.</p>' : '')
     + '<div class="menu-grid">' + SECTIONS.map(([id,label]) => button(id,label)).join('') + '</div>'
     + '<h3>App</h3><div class="menu-grid">' + button('data') + button('navigation') + button('help') + '</div>';
@@ -66,7 +66,7 @@ function openDestination(id){
   close('moreDlg');
   /* Garage wie der Knopf „Meine Garage“: im Verlauf zurück zur Übersicht, damit die Zurück-Geste nicht wieder ins Motorrad führt */
   if (id === 'home') { R.toGarage(); return; }
-  if (['inventory','stats','data','help','navigation'].includes(id)) { R.go({page:id}); return; }
+  if (['inventory','stats','tracks','data','help','navigation'].includes(id)) { R.go({page:id}); return; }   /* ab 1.13.0: Strecken */
   if (SECTIONS.some(s => s[0] === id)) chooseBike(id);
 }
 

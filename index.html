@@ -178,6 +178,8 @@
           <div class="f"><label for="rAmount" id="rAmountLabel">Fahrzeit (h)</label><input id="rAmount" inputmode="decimal" autocomplete="off"></div>
           <label class="check full" id="rInWrap" hidden><input type="checkbox" id="rIn"><span>Schon im abgelesenen Stand von diesem Tag enthalten</span></label>
           <div class="f full"><label for="rTrack">Strecke</label><input id="rTrack" list="trackList" autocomplete="off" placeholder="z. B. MX-Park Gotha"></div>
+          <div class="f"><label for="rLayout">Variante (optional)</label><input id="rLayout" list="rLayoutList" maxlength="80" autocomplete="off" placeholder="z. B. GP-Strecke"><datalist id="rLayoutList"></datalist></div>
+          <div class="f"><label for="rTurns">Turns (optional)</label><input id="rTurns" inputmode="numeric" autocomplete="off" placeholder="Anzahl"></div>
           <div class="f"><label for="rGround">Boden</label><select id="rGround"></select></div>
           <div class="f"><label for="rWeather">Wetter</label><select id="rWeather"></select></div>
           <div class="f full"><label for="rSetup">Fahrwerks-Setup</label><select id="rSetup"></select></div>
@@ -435,6 +437,18 @@
     <div id="statsOut" class="stack-l"></div>
   </section>
 
+  <section id="v-tracks" class="view" hidden aria-labelledby="tracksTitle">
+    <h1 class="page-h" id="tracksTitle" tabindex="-1">Strecken</h1>
+    <p class="hint page-intro">Besuche, Trainingstage, Turns und deine Bestzeiten je Strecke, aus deinen Fahrten.</p>
+    <div class="card" id="trackCtl"><div class="grid">
+      <div class="f"><label for="trFilter">Anzeigen</label><select id="trFilter" data-nodirty><option value="all">Alle Strecken</option><option value="fav">Nur Lieblingsstrecken</option></select></div>
+      <div class="f"><label for="trSort">Sortieren</label><select id="trSort" data-nodirty><option value="last">Zuletzt besucht</option><option value="name">Name</option><option value="visits">Meiste Besuche</option></select></div>
+    </div></div>
+    <div class="row"><button class="btn" type="button" id="lapAdd">Bestzeit eintragen</button></div>
+    <div id="lapBox"></div>
+    <div id="trackOut" class="stack-l"></div>
+  </section>
+
   <section id="v-navigation" class="view" hidden aria-labelledby="navigationTitle">
     <h1 class="page-h" id="navigationTitle">Menü anpassen</h1>
     <p class="hint page-intro">Garage bleibt links, Mehr bleibt rechts. Dazwischen wählst du deine drei Favoriten.</p>
@@ -452,6 +466,7 @@
       <p><b>Gewähltes Motorrad:</b> Das zuletzt geöffnete Motorrad bleibt gewählt, auch im Lager und in den Einstellungen (oben klein genannt). Logbuch, Handbuch und die anderen Bereiche öffnen sich dann direkt für dieses Motorrad. Ein anderes wählst du in der Garage.</p>
       <p><b>Stand eintragen:</b> Tipp unter Status auf das Nummernschild.</p>
       <p><b>Auswertung:</b> Unter „Mehr“ → „Auswertung“ siehst du die Kosten und die gefahrenen Stunden bzw. Kilometer für einen Monat, ein Jahr oder einen eigenen Zeitraum, für ein Motorrad oder alle. Gezählt werden die Kosten aus dem Logbuch (Wartung, Reparatur, Reifen, Kette, Sonstiges) und die Einkäufe im Lager, jeder Einkauf genau einmal; eine Entnahme aus dem Lager kostet nichts zusätzlich. Ein Einkauf zählt nur dann für ein Motorrad, wenn der Artikel allein diesem zugeordnet ist; Artikel für mehrere Motorräder werden nicht aufgeteilt. Einträge ohne Betrag zählen nicht als 0 €, sie werden gesondert genannt. Die gefahrenen Stunden bzw. Kilometer stimmen auch über einen Zählerwechsel hinweg; gezählt wird nur, was zwischen zwei bekannten Ständen liegt. Liegt der Beginn oder das Ende des Zeitraums zwischen zwei Ständen, zeigt Racebook eine Spanne (zum Beispiel „0 bis 20 h“), weil offen ist, wann gefahren wurde; fehlen Stände davor oder danach, steht „mindestens“. Kosten pro Stunde zeigt Racebook bewusst nicht.</p>
+      <p><b>Strecken:</b> Unter „Mehr“ → „Strecken“ stehen alle Strecken aus deinen Fahrten. Ein Trainingstag ist ein Tag mit mindestens einer Fahrt auf der Strecke; zusammenhängende Tage (zum Beispiel Samstag und Sonntag) sind ein Besuch. Turns zählen nur, wenn du sie bei der Fahrt angibst. Lieblingsstrecken markierst du selbst mit dem Stern (höchstens 200); wie oft du irgendwo warst, macht eine Strecke nicht zur Lieblingsstrecke. Bestzeiten trägst du von Hand ein, mit Motorrad, Datum und Variante (zum Beispiel GP-Strecke oder kurze Runde). Verglichen werden nur Zeiten derselben Variante; Zeiten ohne Variante werden nicht verglichen. Sind Zeiten unterschiedlich genau angegeben (zum Beispiel 52 und 52,1), vergleicht Racebook sie nur, wo es sicher geht; lässt sich die schnellste nicht sicher bestimmen, steht dort „nicht eindeutig“.</p>
       <p><b>Ungespeicherte Eingaben:</b> Wechselst du mit geänderten, noch nicht gespeicherten Eingaben zu einem anderen Motorrad, Bereich oder Formular, fragt Racebook nach: „Speichern“, „Verwerfen“ oder „Weiter bearbeiten“. Hat jemand dieselben Daten inzwischen in einem anderen Fenster geändert, speichert Racebook nicht einfach darüber, sondern zeigt den aktuellen Stand mit deinen Änderungen zum Prüfen.</p>
       <p><b>Tätigkeiten:</b> Im Logbuch wählst du, was du tatsächlich gemacht hast (häufige Arbeiten, Favoriten mit Stern, Suche im ganzen Katalog oder freie Eingabe). Getrennt davon stehen die betroffenen Wartungsintervalle. Racebook schlägt ein Intervall nur vor, wenn die Tätigkeiten es vollständig abdecken. „Öl gewechselt“ erledigt zum Beispiel nicht „Motoröl + Ölfilter“, solange der Filter nicht genannt ist. Unklares wie „Gabel gemacht“ musst du selbst auswählen.</p>
       <p><b>Einträge bearbeiten:</b> Wartungen und Notizen im Logbuch lassen sich über „Bearbeiten“ ändern. Vor dem Speichern zeigt Racebook, was sich ändert, auch bei den Fälligkeiten. Stände berichtigst du weiter über „Tippfehler berichtigen“, einen Zählerwechsel unter Fahrzeugdaten.</p>

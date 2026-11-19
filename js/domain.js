@@ -4,6 +4,7 @@
 import {esc, pad, str, fmt, eur, uid, clone, reEsc, validId, safeUrl, parseNum, num, turns, isISO, todayISO, dayNum,
   fromDayNum, shiftDate, addMonths, fmtDate, hexRgb, rgbHex, mixHex, lum, contrast, towards, onColor, canon, same, subOf, MAX_BUYS} from './util.js';
 import {navigationOf} from './preferences.js';
+import {tracksOf, nameOf, TRACK_MAX, LAYOUT_MAX, LAP_NOTE_MAX, MAX_LAPS, LAP_MAX_MS, TURNS_MAX} from './tracks.js';
 import {S, COLLS, bikeList, curBike, U, bikeName} from './state.js';
 import {parseWork, ivProposal, workPos, workEntry} from './work.js';
 import {CAT_KEYS} from './label.js';
@@ -60,8 +61,11 @@ export const ZIP_FORMAT = 'racebook-backup';
    verwerfen; deshalb lehnt es Version 14 ab.
    Ab 1.9.0 Version 15, wenn ein Setup Reifenangaben je Rad oder einen Untergrund hat (tyres, surface, Issue #16). 1.8.x würde sie
    beim Einlesen still verwerfen; deshalb lehnt es Version 15 ab.
-   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 bzw. 14. */
-export const ZIP_VERSION = 15;
+   Ab 1.13.0 Version 16, wenn ein Motorrad Bestzeiten hat (laps), eine Fahrt eine Streckenvariante oder Turns (layout, turns) oder
+   Lieblingsstrecken markiert sind (tracks, Roadmap 8). 1.12.x würde sie beim Einlesen still verwerfen; deshalb lehnt es Version 16 ab.
+   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 bzw. 15. */
+export const ZIP_VERSION = 16;
+export const ZIP_VERSION_V15 = 15;
 export const ZIP_VERSION_V14 = 14;
 export const ZIP_VERSION_V13 = 13;
 export const ZIP_VERSION_V12 = 12;
@@ -106,6 +110,10 @@ export const needsV14 = next => Object.values((next && next.bikes) || {}).some(h
 /* ab 1.9.0 (Issue #16): Reifenangaben je Rad oder Untergrund im Setup */
 export const hasV15Setup = s => !!s && typeof s === 'object' && ((s.tyres != null && typeof s.tyres === 'object') || (s.surface != null && typeof s.surface === 'object'));
 export const needsV15 = next => Object.values((next && next.setups) || {}).some(hasV15Setup);
+/* ab 1.13.0 (Roadmap 8): Bestzeiten am Motorrad, Variante oder Turns einer Fahrt, Lieblingsstrecken (meta 'tracks') */
+export const hasV16Bike = b => !!b && typeof b === 'object' && Array.isArray(b.laps) && b.laps.length > 0;
+export const hasV16Ride = r => !!r && typeof r === 'object' && ((r.layout != null && r.layout !== '') || r.turns != null);
+export const needsV16 = (next, tracks) => !!tracks || Object.values((next && next.bikes) || {}).some(hasV16Bike) || Object.values((next && next.rides) || {}).some(hasV16Ride);
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
 const isOrphan = (k, d, bikeIds) => k === 'parts' ? (d.bike !== 'both' && d.bike !== 'some' && !bikeIds.has(d.bike)) : !bikeIds.has(d.bike);
@@ -270,6 +278,7 @@ export function cleanBike(x, strict, where){
     ...cleanBikeV8(x, h),
     ...(x.hist != null ? {hist: cleanHist(x.hist, h)} : {}),
     ...(x.acc != null ? {acc: cleanAcc(x.acc, h)} : {}),
+    ...(x.laps != null ? {laps: cleanLaps(x.laps, h)} : {}),
     oem: {rows: h.a(oem.rows, 'Herstellervorgaben').filter(r => r && typeof r === 'object').slice(0, 50).map(r => ({when: h.s(r.when, 'Herstellervorgabe', {max:60}), what: h.s(r.what, 'Herstellervorgabe', {max:300})})), note: h.s(oem.note, 'Hinweis', {max:2000}), sourceTitle: h.s(oem.sourceTitle, 'Quelle', {max:200}), sourceUrl: safeUrl(oem.sourceUrl)},
     manual
   };
@@ -344,6 +353,32 @@ export function cleanAcc(v, h){
     const o = {id, name};
     const s = (k, l) => { const x = h.s(r[k], w + ' (' + l + ')', {max: ACC_MAX[k]}); if (x) o[k] = x; };
     s('maker', 'Hersteller'); s('model', 'Modell'); s('note', 'Notiz');
+    return o;
+  }).filter(Boolean);
+}
+/* ---------- Bestzeiten (ab 1.13.0, Roadmap 8) ----------
+   laps am Motorrad – nur wenn benutzt, bestehende Motorräder bleiben exakt gleich: [{id, track, layout, date, ms, dig, note, created, edited}].
+   Von Hand eingetragen: Strecke, Datum und Zeit sind Pflicht; layout = Streckenvariante (leer = nicht angegeben, wird nicht verglichen);
+   ms = Zeit in Millisekunden, dig = angegebene Nachkommastellen (0–3, nichts wird ergänzt). */
+export function cleanLaps(v, h){
+  const arr = h.a(v, 'Bestzeiten');
+  if (arr.length > MAX_LAPS) h.fail('Bestzeiten', 'hat mehr als ' + MAX_LAPS + ' Einträge.');
+  const seen = new Set();
+  return arr.slice(0, MAX_LAPS).map((r, i) => {
+    const w = 'Bestzeit ' + (i + 1);
+    if (!r || typeof r !== 'object' || Array.isArray(r)) { h.fail(w, 'ist ungültig.'); return null; }
+    const id = h.id(r.id, w + ' (ID)'); if (!id) return null;
+    if (seen.has(id)) { h.fail(w, 'kommt doppelt vor.'); return null; }
+    const track = h.s(r.track, w + ' (Strecke)', {req: true, max: TRACK_MAX}), date = h.d(r.date, w + ' (Datum)', {req: true});
+    const ms = h.n(r.ms, w + ' (Zeit)', {int: true, min: 1, max: LAP_MAX_MS}), dig = h.n(r.dig, w + ' (Genauigkeit)', {int: true, min: 0, max: 3});
+    if (ms == null) h.fail(w + ' (Zeit)', 'fehlt.');
+    if (!track || !date || ms == null) return null;
+    seen.add(id);
+    const o = {id, track: nameOf(track), date, ms, dig: dig == null ? 3 : dig};
+    const layout = nameOf(h.s(r.layout, w + ' (Variante)', {max: LAYOUT_MAX})); if (layout) o.layout = layout;
+    const note = h.s(r.note, w + ' (Notiz)', {max: LAP_NOTE_MAX}); if (note) o.note = note;
+    const c = h.n(r.created, w + ' (Zeitstempel)', {int: true, min: 0}); o.created = c || 0;
+    if (r.edited != null) { const e = h.n(r.edited, w + ' (Bearbeitet)', {int: true, min: 0}); if (e != null) o.edited = e; }
     return o;
   }).filter(Boolean);
 }
@@ -454,10 +489,16 @@ export function cleanDoc(coll, x, strict, where){
     if (x.edited != null) { const t = h.n(x.edited, 'Bearbeitet', {int: true, min: 0}); if (t != null) d.edited = t; }
     return d;
   }
-  if (coll === 'rides') return {bike, date: h.d(x.date, 'Datum', {req:true}) || '', track: h.s(x.track, 'Strecke', {max:120}),
+  if (coll === 'rides') {
+    const o = {bike, date: h.d(x.date, 'Datum', {req:true}) || '', track: h.s(x.track, 'Strecke', {max:120}),
     amount: h.n(x.amount, 'Fahrzeit', {gt:0, max:LIM.km.ride}), ground: h.s(x.ground, 'Boden', {max:40}), weather: h.s(x.weather, 'Wetter', {max:40}),
     setupId: h.id(x.setupId, 'Setup', {opt:true}), setupSnap: cleanSnap(x.setupSnap, h), feel: h.n(x.feel, 'Gefühl', {int:true, min:1, max:5}), inReading: x.inReading === true,
     note: h.s(x.note, 'Notiz', {max:4000}), created: h.n(x.created, 'Zeitstempel', {int:true, min:0}) || 0};
+    /* ab 1.13.0 (Roadmap 8): Streckenvariante und Anzahl der Turns – nur wenn angegeben, bestehende Fahrten bleiben exakt gleich */
+    const lay = nameOf(h.s(x.layout, 'Variante', {max: LAYOUT_MAX})); if (lay) o.layout = lay;
+    if (x.turns != null) { const t = h.n(x.turns, 'Turns', {int: true, min: 1, max: TURNS_MAX}); if (t != null) o.turns = t; }
+    return o;
+  }
   if (coll === 'setups') { const o = {bike, track: h.s(x.track, 'Strecke', {req:true, max:120}), note: h.s(x.note, 'Notiz', {max:2000}), updated: h.d(x.updated, 'Datum')}; SF.forEach(([, k, l, r]) => { o[k] = h.n(x[k], l, {int:r.int, min:r.min, max:r.max}); });
     /* ab 1.9.0 (Issue #16): nur wenn erfasst – bestehende Setups bleiben exakt gleich */
     const ty = cleanSetupTyres(x.tyres, h); if (ty) o.tyres = ty;
@@ -760,6 +801,7 @@ export const sigOf = s => SF.map(([, k]) => s && s[k] != null ? s[k] : '').join(
 export function rideDoc(b, o){
   const setup = o.setupId ? S.setups.find(s => s.id === o.setupId) : null;
   return canonDoc('rides', {bike: b.id, date: o.date, track: o.track || '', amount: o.amount, ground: o.ground || '', weather: o.weather || '',
+    layout: o.layout || '', turns: o.turns == null ? null : o.turns,
     setupId: setup ? setup.id : '', setupSnap: setup ? snapOf(setup) : null, feel: o.feel || null, inReading: o.inReading === true, note: o.note || '', created: o.created || Date.now()});
 }
 export function noteDoc(b, o){
@@ -1202,12 +1244,15 @@ export function validateZipJson(d){
   if (d.version < 9 && d.navigation != null) throw new Error('Menübelegung in einer Sicherung vor Version 9.');
   if (d.version < 13 && (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV13Bike)) throw new Error('Die Sicherung ist beschädigt (Teilehistorie oder Angaben zu Reifen und Kette in einer Sicherung vor Version 13).');
   if (d.version < 14 && (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV14Bike)) throw new Error('Die Sicherung ist beschädigt (Zubehör in einer Sicherung vor Version 14).');
+  if (d.version < 16 && (d.tracks != null || (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV16Bike)
+    || [].concat(Array.isArray(d.fahrten) ? d.fahrten : [], d.verwaist && Array.isArray(d.verwaist.fahrten) ? d.verwaist.fahrten : []).some(hasV16Ride))) throw new Error('Die Sicherung ist beschädigt (Bestzeiten, Streckenvarianten, Turns oder Lieblingsstrecken in einer Sicherung vor Version 16).');
   if (d.version < 15 && [].concat(Array.isArray(d.fahrwerk) ? d.fahrwerk : [], d.verwaist && Array.isArray(d.verwaist.fahrwerk) ? d.verwaist.fahrwerk : []).some(hasV15Setup)) throw new Error('Die Sicherung ist beschädigt (Reifenangaben oder Untergrund im Setup in einer Sicherung vor Version 15).');
   const teile = [].concat(Array.isArray(d.teile) ? d.teile : [], d.verwaist && Array.isArray(d.verwaist.teile) ? d.verwaist.teile : []);
   if (d.version < 10 && teile.some(hasV10Part)) throw new Error('Die Sicherung ist beschädigt (Artikelangaben oder Artikelbilder in einer Sicherung vor Version 10).');
   if (d.version < 11 && teile.some(hasV11Part)) throw new Error('Die Sicherung ist beschädigt (Mehrfachzuordnung oder Einkaufspreise in einer Sicherung vor Version 11).');
   if (d.version < 12 && teile.some(hasV12Part)) throw new Error('Die Sicherung ist beschädigt (Einkäufe aus Rechnungsfotos in einer Sicherung vor Version 12).');
   const navigation = navigationOf(d.navigation);
+  const tracks = tracksOf(d.tracks);
   const map = {}; COLLS.forEach(k => { map[k] = d[KEYS[k]]; });
   const next = strictCollections(map);
   const orphans = strictOrphans(d.verwaist, next);
@@ -1234,7 +1279,7 @@ export function validateZipJson(d){
   fileRefs(all).forEach((what, id) => { if (seen.has(id)) needed.add(id); else if (known.has(id)) missing.push(what); else broken.push(what); });
   if (broken.length) throw new Error('In der Sicherung fehlen Anhänge: ' + broken.join('; ') + '.');
   const meta = d.stand && typeof d.stand === 'object' ? d.stand : {};
-  return {next, navigation, orphans, missing, files: files.filter(f => needed.has(f.id)), needed, source: 'zip', version: d.version,
+  return {next, navigation, tracks, orphans, missing, files: files.filter(f => needed.has(f.id)), needed, source: 'zip', version: d.version,
     exported: typeof d.exportiert === 'string' ? d.exportiert : '', changeSeq: Number.isInteger(meta.changeSeq) ? meta.changeSeq : null};
 }
 

@@ -14,6 +14,7 @@ import * as defects from './views/defects.js';
 import * as home from './views/home.js';
 import * as data from './views/data.js';
 import * as stats from './views/stats.js';
+import * as tracks from './views/tracks.js';
 import * as counter from './views/counter.js';
 import * as drafts from './drafts.js';
 import * as nav from './navigation.js';
@@ -30,7 +31,7 @@ function applyTheme(){
 applyTheme();
 
 /* ---------- Seiten ---------- */
-const PAGES = ['home', 'bike', 'inventory', 'stats', 'navigation', 'data', 'help', 'add', 'error'];
+const PAGES = ['home', 'bike', 'inventory', 'stats', 'tracks', 'navigation', 'data', 'help', 'add', 'error'];
 function showPage(p){
   PAGES.forEach(x => { const el = $('#v-' + x); if (el) el.hidden = x !== p; });
   $('#tabs').hidden = p === 'error';
@@ -79,15 +80,15 @@ function renderChrome(){
   /* ab 1.7.2 (Issue #12): auf der Motorrad-Seite oben der geöffnete Bereich, darunter das Motorrad als Kontext */
   const sec = p === 'bike' && b ? (SECTION_LABEL[R.route.section] || SECTION_LABEL.status) : '';
   const bikeCtx = p === 'bike' && b ? bike.titleOf(b) + (b.nickname ? ' · ' + ((b.brand || '') + ' ' + (b.model || '')).trim() : '') : '';
-  const t = p === 'bike' && b ? sec : p === 'data' ? 'Einstellungen' : p === 'inventory' ? 'Lager' : p === 'stats' ? 'Auswertung' : p === 'navigation' ? 'Menü anpassen' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
+  const t = p === 'bike' && b ? sec : p === 'data' ? 'Einstellungen' : p === 'inventory' ? 'Lager' : p === 'stats' ? 'Auswertung' : p === 'tracks' ? 'Strecken' : p === 'navigation' ? 'Menü anpassen' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
   title.hidden = !t;
   /* ab 1.7.3 (Issue #14): auf Lager, Einstellungen, Menü und Hilfe klein das gewählte Motorrad (Bereiche über „Mehr“ und die untere
      Leiste öffnen dieses); das Lager bleibt der gemeinsame Bestand aller Motorräder, nichts wird danach gefiltert */
-  const kept = (p === 'inventory' || p === 'stats' || p === 'data' || p === 'navigation' || p === 'help') ? nav.pickedBike() : null;
+  const kept = (p === 'inventory' || p === 'stats' || p === 'tracks' || p === 'data' || p === 'navigation' || p === 'help') ? nav.pickedBike() : null;
   const sub = bikeCtx || (kept ? 'Gewähltes Motorrad: ' + bike.titleOf(kept) : '');
   title.innerHTML = t ? '<span class="bt-main">' + escHTML(t) + '</span>' + (sub ? '<span class="bt-sub">' + escHTML(sub) + '</span>' : '') : '';
   const chip = $('#backupChip');
-  const has = (bikeList().length > 0 || S.parts.length > 0 || !!S.navigation) && S.mode === 'ready';
+  const has = (bikeList().length > 0 || S.parts.length > 0 || !!S.navigation || !!S.tracks) && S.mode === 'ready';
   chip.hidden = !has || p === 'data';
   if (has) {
     const n = (S.changeSeq || 0) - (S.backup ? S.backup.seq || 0 : 0);
@@ -173,6 +174,7 @@ function onDatasetChange(phase){
     bike.closeDraft('rcptForm');   /* ab 1.6.0: offener Beleg (samt laufender Erkennung) gehört zum alten Bestand */
     bike.closeDraft('histForm');   /* ab 1.7.0: Teilehistorie gehört zum alten Bestand */
     bike.closeDraft('accForm');   /* ab 1.8.0: Zubehör gehört zum alten Bestand */
+    tracks.close();   /* ab 1.13.0: Bestzeit gehört zum alten Bestand */
     if (S.adding || S.addPhoto) bike.closeDraft('addBikeForm');
     S.shareReady = null; S.oemDraft = null; S.editing = {};
     nav.resetEditor();
@@ -204,6 +206,7 @@ function renderAll(){
   if (p === 'navigation') nav.renderEditor();
   if (p === 'data') data.renderData();
   if (p === 'stats') stats.renderStats();
+  if (p === 'tracks') tracks.renderTracks();   /* ab 1.13.0 */
   if (p === 'add') bike.renderAddBike();
   counter.onRender();
   drafts.settle();
@@ -221,6 +224,9 @@ function applyRoute(r){
   const changed = R.route.page !== r.page || R.route.bike !== r.bike;
   /* ab 1.7.1: Lager ↔ Artikeldetails – Scrollposition der Liste merken und beim Zurückkehren wiederherstellen */
   const invFrom = R.route.page === 'inventory' ? (R.route.part || '') : null, invTo = r.page === 'inventory' ? (r.part || '') : null;
+  /* ab 1.13.0: Strecken ↔ einzelne Strecke – wie im Lager Position merken und Fokus setzen */
+  const trFrom = R.route.page === 'tracks' ? (R.route.track || '') : null, trTo = r.page === 'tracks' ? (r.track || '') : null;
+  if (trFrom === '' && trTo) S.trScroll = window.scrollY;
   if (invFrom === '' && invTo) S.invScroll = window.scrollY;
   R.route = r;
   showPage(S.mode === 'error' ? 'error' : r.page);
@@ -229,6 +235,8 @@ function applyRoute(r){
   renderAll();
   if (invTo && invTo !== invFrom) { window.scrollTo(0, 0); const h = document.getElementById('partDetailTitle'); if (h) h.focus({preventScroll: true}); }
   else if (invTo === '' && invFrom) { window.scrollTo(0, S.invScroll || 0); const c = document.querySelector('[data-partview="' + CSS.escape(invFrom) + '"]'); if (c) c.focus({preventScroll: true}); }
+  else if (trTo && trTo !== trFrom) { window.scrollTo(0, 0); const h = document.getElementById('trackTitle'); if (h) h.focus({preventScroll: true}); }
+  else if (trTo === '' && trFrom) { window.scrollTo(0, S.trScroll || 0); const c = document.querySelector('[data-track="' + CSS.escape(trFrom) + '"]'); if (c) c.focus({preventScroll: true}); }
   else if (r.anchor) { const a = document.getElementById(r.anchor); if (a) a.scrollIntoView({block: 'start'}); }   /* ab 1.9.1: alter Link „Technische Daten“ */
   else if (changed) window.scrollTo(0, 0);
 }
@@ -322,7 +330,7 @@ DB.onChange(stores => {
   /* ab 1.10.0: nur der Speicherbereich der Punkte und der Sicherheitskopie geändert (dieses oder ein anderes Fenster): Verwaltungsdaten
      neu lesen, die Seite „Daten & Sicherung“ nur neu zeichnen, wenn sich ihre Anzeige ändert */
   if (stores.size === 1 && stores.has('snapshots')) { data.refreshMeta().then(() => { if (R.route.page === 'data' && data.pointsDirty()) data.renderData(); }); return; }
-  clearTimeout(metaQ); metaQ = setTimeout(() => Promise.all([data.refreshMeta(), nav.refreshPreferences()]).then(scheduleRender), 30);
+  clearTimeout(metaQ); metaQ = setTimeout(() => Promise.all([data.refreshMeta(), nav.refreshPreferences(), tracks.refreshFav()]).then(scheduleRender), 30);
 });
 
 /* ---------- Ereignisse ---------- */
@@ -358,16 +366,16 @@ document.addEventListener('click', async e => {
     $('#lbImg').src = u; $('#lightbox').showModal(); return;
   }
   if (t.id === 'lbClose') { $('#lightbox').close(); return; }
-  for (const h of [home.onClick, defects.onClick, data.onClick, bike.onClick]) { if (await h(t, e)) return; }
+  for (const h of [home.onClick, defects.onClick, data.onClick, tracks.onClick, bike.onClick]) { if (await h(t, e)) return; }
 });
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.getAttribute && t.getAttribute('aria-invalid')) t.removeAttribute('aria-invalid');
   if (t.id === 'inventorySearch') { bike.renderInventory(); return; }
   nav.onInput(t);
-  stats.onInput(t) || defects.onInput(t) || bike.onInput(t);
+  stats.onInput(t) || tracks.onInput(t) || defects.onInput(t) || bike.onInput(t);
 });
-document.addEventListener('change', e => { const t = e.target; if (nav.onChange(t)) return; if (t.id === 'inventoryBike' || t.id === 'inventoryLow') { bike.renderInventory(); return; } defects.onChange(t) || data.onChange(t) || bike.onChange(t); });
+document.addEventListener('change', e => { const t = e.target; if (nav.onChange(t) || tracks.onChange(t)) return; if (t.id === 'inventoryBike' || t.id === 'inventoryLow') { bike.renderInventory(); return; } defects.onChange(t) || data.onChange(t) || bike.onChange(t); });
 document.addEventListener('submit', e => {
   const f = e.target;
   if (f.id === 'quickForm') { bike.onQuick(e); return; }
@@ -382,6 +390,7 @@ async function submitForm(f){
   try {
     return await drafts.savingRun(async () => {
       if (f.id === 'navigationForm') return nav.saveEditor();
+      if (f.id === 'lapForm') return tracks.submit(busy);   /* ab 1.13.0: Bestzeit */
       if (await defects.onSubmit(f, busy)) return true;
       await bike.onSubmit(f, busy);
       return true;
@@ -420,7 +429,7 @@ function applyUpdate(){
 function initStatic(){
   nav.initNavigation();
   $$('form').forEach(f => f.setAttribute('novalidate', ''));
-  bike.initBikeForms(); counter.initCounter(); drafts.initDrafts(); defects.registerDefectDrafts();
+  bike.initBikeForms(); counter.initCounter(); drafts.initDrafts(); defects.registerDefectDrafts(); tracks.register();
   bike.resetBikeForms();
 }
 async function boot(){
@@ -453,6 +462,7 @@ async function boot(){
   if (gone) setTimeout(() => toast(gone === 1 ? 'Ein ungeklärter Speicherversuch gehörte zu einem inzwischen ersetzten Datenbestand und wurde verworfen.' : gone + ' ungeklärte Speicherversuche gehörten zu einem inzwischen ersetzten Datenbestand und wurden verworfen.'), 400);
   await data.refreshMeta();
   await nav.refreshPreferences();
+  await tracks.refreshFav();   /* ab 1.13.0: Lieblingsstrecken */
   S.v8 = readV8Local();
   S.picked = pickedGet();   /* ab 1.7.3 (Issue #14): zuletzt bewusst geöffnetes Motorrad (dieses Fenster bzw. dieses Gerät) */
   store.emitAll();

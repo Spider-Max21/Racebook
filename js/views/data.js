@@ -138,6 +138,7 @@ function previewHTML(d){
     + '<dt>Inhalt</dt><dd>' + esc(countText(d.counts)) + '</dd>'
     + '<dt>Motorräder</dt><dd>' + (d.bikes.length ? esc(d.bikes.join('; ')) : '–') + '</dd>'
     + '<dt>Menü</dt><dd>' + (d.navigation ? 'Persönliche Belegung wird übernommen' : 'Standardbelegung') + '</dd>'
+    + (d.tracks ? '<dt>Lieblingsstrecken</dt><dd>' + esc(d.tracks.fav.length === 1 ? '1 markierte Strecke' : d.tracks.fav.length + ' markierte Strecken') + '</dd>' : '')   /* ab 1.13.0 */
     + '<dt>Dateien</dt><dd>' + (d.files || []).length + (fileSize ? ' (' + fmtSize(fileSize) + ')' : '') + '</dd></dl>'
     + (d.orphanCount ? '<p class="warnbox"><b>' + (d.orphanCount === 1 ? 'Ein Eintrag gehört' : d.orphanCount + ' Einträge gehören') + ' zu keinem Motorrad</b> (aus einer früheren Version). Sie werden ohne Motorrad übernommen und danach hier unter „Einträge ohne Motorrad“ zum Zuordnen oder Löschen angezeigt.</p>' : '')
     + (d.missing && d.missing.length ? '<div class="warnbox"><b>Nicht übernommen werden ' + d.missing.length + ' Anhänge:</b><ul class="miss">' + d.missing.map(m => '<li>' + esc(typeof m === 'string' ? m : m.where + ': ' + m.what) + '</li>').join('') + '</ul>'
