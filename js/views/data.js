@@ -87,9 +87,13 @@ function pointsHTML(){
   return h + '</div>';
 }
 /* ab 1.11.0 (Issue #18 Teil 2): Sicherungsdatei außerhalb des App-Speichers, nur wo der Browser selbst in eine gewählte Datei schreiben kann */
+/* Sicherbarer Bestand: Motorräder, Lagerartikel oder persönliche Einstellungen (Menübelegung, Lieblingsstrecken, Auswahl der Startseite).
+   Ab 1.14.0 überall gleich (Herunterladen, Sicherungsdatei, Einspielen), Prüfbefund P2 in PR #28. */
+const hasData = () => bikeList().length > 0 || S.parts.length > 0 || !!S.navigation || !!S.tracks || !!S.dashboard;
+const emptyDraft = d => !d.counts.bikes && !d.counts.parts && !d.navigation && !d.tracks && !d.dashboard;
 function fileHTML(){
   const f = S.fileBk || {state: filebk.supported() ? 'loading' : 'unsupported'};
-  const has = bikeList().length > 0 || S.parts.length > 0;
+  const has = hasData();
   let h = '<div class="bk-file" id="fileBox"><h3>Automatisch in eine Datei</h3>';
   if (f.state === 'unsupported')
     return h + '<p id="fileStatus">Dieser Browser kann nicht selbst in eine Datei schreiben (zum Beispiel Safari auf iPhone und iPad oder Firefox). Nutze „Sicherung herunterladen“ oder „Teilen“ und lege die Datei in deine Cloud oder auf den PC.</p></div>';
@@ -130,7 +134,7 @@ function setupHTML(){
 function previewHTML(d){
   const cur = {}; COLLS.forEach(k => { cur[k] = k === 'bikes' ? bikeList().length : S[k].length; });
   const fileSize = (d.files || []).reduce((a, f) => a + (f.size || 0), 0);
-  const empty = !d.counts.bikes && !d.counts.parts && !d.navigation;
+  const empty = emptyDraft(d);
   return '<div class="preview" id="importPreview"><h3>Sicherung prüfen</h3><dl class="kv">'
     + '<dt>Quelle</dt><dd>' + esc(SRC[d.source] || 'Sicherung') + '</dd>'
     + (d.fileName ? '<dt>Datei</dt><dd>' + esc(d.fileName) + '</dd>' : '')
@@ -139,11 +143,12 @@ function previewHTML(d){
     + '<dt>Motorräder</dt><dd>' + (d.bikes.length ? esc(d.bikes.join('; ')) : '–') + '</dd>'
     + '<dt>Menü</dt><dd>' + (d.navigation ? 'Persönliche Belegung wird übernommen' : 'Standardbelegung') + '</dd>'
     + (d.tracks ? '<dt>Lieblingsstrecken</dt><dd>' + esc(d.tracks.fav.length === 1 ? '1 markierte Strecke' : d.tracks.fav.length + ' markierte Strecken') + '</dd>' : '')   /* ab 1.13.0 */
+    + (d.dashboard ? '<dt>Startseite</dt><dd>Persönliche Auswahl wird übernommen</dd>' : '')   /* ab 1.14.0 */
     + '<dt>Dateien</dt><dd>' + (d.files || []).length + (fileSize ? ' (' + fmtSize(fileSize) + ')' : '') + '</dd></dl>'
     + (d.orphanCount ? '<p class="warnbox"><b>' + (d.orphanCount === 1 ? 'Ein Eintrag gehört' : d.orphanCount + ' Einträge gehören') + ' zu keinem Motorrad</b> (aus einer früheren Version). Sie werden ohne Motorrad übernommen und danach hier unter „Einträge ohne Motorrad“ zum Zuordnen oder Löschen angezeigt.</p>' : '')
     + (d.missing && d.missing.length ? '<div class="warnbox"><b>Nicht übernommen werden ' + d.missing.length + ' Anhänge:</b><ul class="miss">' + d.missing.map(m => '<li>' + esc(typeof m === 'string' ? m : m.where + ': ' + m.what) + '</li>').join('') + '</ul>'
       + (d.source === 'zip' ? 'Sie fehlten schon beim Erstellen der Sicherung.' : 'Diese Dateien liegen im Speicher der Claude-App und sind nicht in der Sicherung enthalten. Lade sie bei Bedarf hier neu hoch (Fahrzeugdaten → Foto, Handbuch → PDF).') + '</div>' : '')
-    + (empty ? '<p class="warnbox"><b>Diese Sicherung enthält keine Motorräder, Lagerartikel oder Menübelegung.</b> Sie wird nicht eingespielt, damit deine Garage nicht geleert wird.</p>'
+    + (empty ? '<p class="warnbox"><b>Diese Sicherung enthält keine Motorräder, Lagerartikel oder persönlichen Einstellungen (Menü, Lieblingsstrecken, Startseite).</b> Sie wird nicht eingespielt, damit deine Garage nicht geleert wird.</p>'
       : '<p class="warnbox">Die Sicherung ersetzt alle Daten auf diesem Gerät (jetzt: ' + esc(countText(cur)) + '). ' + (cur.bikes ? 'Der jetzige Stand wird vorher als Sicherheitskopie aufbewahrt und lässt sich wiederherstellen.' : 'Die Garage auf diesem Gerät ist leer.') + '</p>')
     + '<div class="row">' + (cur.bikes && !empty ? '<button class="btn" type="button" id="exportBefore">' + icon('save') + 'Aktuellen Stand vorher herunterladen</button>' : '')
     + (empty ? '' : '<button class="btn primary" type="button" id="importDo"' + (S.importBusy ? ' disabled' : '') + '>' + (S.importBusy ? 'Wird eingespielt …' : (d.source === 'v8-local' ? 'Übernehmen' : 'Alle Daten ersetzen')) + '</button>')
@@ -206,9 +211,9 @@ export function renderData(){
   /* ab 1.10.0: eingefügter, noch nicht geprüfter Sicherungstext bleibt beim Neuzeichnen erhalten */
   const pasteEl = document.getElementById('importPaste'), paste = pasteEl ? pasteEl.value : '';
   if (S.mode !== 'ready') { el.innerHTML = '<p class="hint thinking">Speicher wird geladen …</p>'; return; }
-  const has = bikeList().length > 0 || S.parts.length > 0 || !!S.navigation;
+  const has = hasData();
   const parts = [];
-  parts.push('<section class="card"><h2>Einstellungen</h2><p class="hint">Darstellung, Menü und Sicherung für die ganze App.</p><div class="row"><button class="btn" type="button" data-nav="navigation">Menü anpassen</button><button class="btn ghost" type="button" data-settingsjump="appearanceCard">Darstellung</button><button class="btn ghost" type="button" data-settingsjump="bkCard">Daten &amp; Sicherung</button></div></section>');
+  parts.push('<section class="card"><h2>Einstellungen</h2><p class="hint">Darstellung, Menü, Startseite und Sicherung für die ganze App.</p><div class="row"><button class="btn" type="button" data-nav="navigation">Menü anpassen</button><button class="btn" type="button" data-nav="dashboard">Startseite anpassen</button><button class="btn ghost" type="button" data-settingsjump="appearanceCard">Darstellung</button><button class="btn ghost" type="button" data-settingsjump="bkCard">Daten &amp; Sicherung</button></div></section>');
   const th = lsGet('theme') || 'system';
   parts.push('<section class="card" id="appearanceCard"><h2>Darstellung</h2><div class="f"><label for="themeSel">Farbschema</label><select id="themeSel"><option value="system"' + (th === 'system' ? ' selected' : '') + '>wie das Gerät</option><option value="dark"' + (th === 'dark' ? ' selected' : '') + '>dunkel</option><option value="light"' + (th === 'light' ? ' selected' : '') + '>hell</option></select></div></section>');
   parts.push('<section class="card" id="bkCard"><h2>Sicherung</h2>' + pointsHTML() + '<div class="bk-part" id="outsideBox"><h3>Außerhalb der App</h3>' + backupStatus()
@@ -322,7 +327,7 @@ const resetNote = () => (S.lastReset && S.lastReset.drafts ? ' Offene Eingaben w
   + (S.lastReset && S.lastReset.unres ? ' Ungeklärte Speicherversuche des vorherigen Stands sind damit hinfällig.' : '');
 async function doImport(){
   const d = S.importDraft; if (!d || S.importBusy) return;
-  if (!d.counts.bikes && !d.counts.parts && !d.navigation) { toast('Diese Sicherung enthält keine Motorräder, Lagerartikel oder Menübelegung und wird nicht eingespielt.'); return; }
+  if (emptyDraft(d)) { toast('Diese Sicherung enthält keine Motorräder, Lagerartikel oder persönlichen Einstellungen und wird nicht eingespielt.'); return; }
   S.importBusy = true; S.lastReset = null; renderData();
   try { await replaceGuarded('import', () => applyDraft(d, d.source === 'v8-local' ? 'Übernahme der bisherigen Version' : 'Sicherung eingespielt')); }
   catch (e) {

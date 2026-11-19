@@ -26,7 +26,7 @@ const button = (id,label,cls='menu-link') => '<button class="' + cls + '" type="
 
 export function renderNavigation(){
   const page = R.route.page, section = R.route.section, slots = slotsOf(S.navigation && S.navigation.slots);
-  const current = page === 'bike' ? section : page;
+  const current = page === 'bike' ? section : page === 'dashboard' ? 'home' : page;   /* ab 1.14.0: Startseite anpassen gehört zur Garage */
   const ids = ['home', ...slots, 'more'];
   const html = ids.map(id => '<button class="tab" type="button" data-destination="' + id + '" aria-label="' + esc(LABELS[id] || 'Mehr') + '" aria-current="' + (id === current || (id === 'more' && !ids.includes(current)) ? 'page' : 'false') + '"' + (id === 'more' ? ' aria-haspopup="dialog" aria-controls="moreDlg" aria-expanded="' + !!$('#moreDlg').open + '"' : '') + '>' + icon(id) + '<span>' + esc(SHORT[id] || LABELS[id] || 'Mehr') + '</span></button>').join('');
   if ($('#tabsIn').innerHTML !== html) $('#tabsIn').innerHTML = html;

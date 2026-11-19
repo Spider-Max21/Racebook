@@ -15,6 +15,7 @@ import * as home from './views/home.js';
 import * as data from './views/data.js';
 import * as stats from './views/stats.js';
 import * as tracks from './views/tracks.js';
+import * as dash from './views/startseite.js';
 import * as counter from './views/counter.js';
 import * as drafts from './drafts.js';
 import * as nav from './navigation.js';
@@ -31,7 +32,7 @@ function applyTheme(){
 applyTheme();
 
 /* ---------- Seiten ---------- */
-const PAGES = ['home', 'bike', 'inventory', 'stats', 'tracks', 'navigation', 'data', 'help', 'add', 'error'];
+const PAGES = ['home', 'bike', 'inventory', 'stats', 'tracks', 'navigation', 'dashboard', 'data', 'help', 'add', 'error'];
 function showPage(p){
   PAGES.forEach(x => { const el = $('#v-' + x); if (el) el.hidden = x !== p; });
   $('#tabs').hidden = p === 'error';
@@ -80,7 +81,7 @@ function renderChrome(){
   /* ab 1.7.2 (Issue #12): auf der Motorrad-Seite oben der geöffnete Bereich, darunter das Motorrad als Kontext */
   const sec = p === 'bike' && b ? (SECTION_LABEL[R.route.section] || SECTION_LABEL.status) : '';
   const bikeCtx = p === 'bike' && b ? bike.titleOf(b) + (b.nickname ? ' · ' + ((b.brand || '') + ' ' + (b.model || '')).trim() : '') : '';
-  const t = p === 'bike' && b ? sec : p === 'data' ? 'Einstellungen' : p === 'inventory' ? 'Lager' : p === 'stats' ? 'Auswertung' : p === 'tracks' ? 'Strecken' : p === 'navigation' ? 'Menü anpassen' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
+  const t = p === 'bike' && b ? sec : p === 'data' ? 'Einstellungen' : p === 'inventory' ? 'Lager' : p === 'stats' ? 'Auswertung' : p === 'tracks' ? 'Strecken' : p === 'navigation' ? 'Menü anpassen' : p === 'dashboard' ? 'Startseite anpassen' : p === 'help' ? 'Hilfe' : p === 'add' ? 'Motorrad hinzufügen' : '';
   title.hidden = !t;
   /* ab 1.7.3 (Issue #14): auf Lager, Einstellungen, Menü und Hilfe klein das gewählte Motorrad (Bereiche über „Mehr“ und die untere
      Leiste öffnen dieses); das Lager bleibt der gemeinsame Bestand aller Motorräder, nichts wird danach gefiltert */
@@ -88,7 +89,7 @@ function renderChrome(){
   const sub = bikeCtx || (kept ? 'Gewähltes Motorrad: ' + bike.titleOf(kept) : '');
   title.innerHTML = t ? '<span class="bt-main">' + escHTML(t) + '</span>' + (sub ? '<span class="bt-sub">' + escHTML(sub) + '</span>' : '') : '';
   const chip = $('#backupChip');
-  const has = (bikeList().length > 0 || S.parts.length > 0 || !!S.navigation || !!S.tracks) && S.mode === 'ready';
+  const has = (bikeList().length > 0 || S.parts.length > 0 || !!S.navigation || !!S.tracks || !!S.dashboard) && S.mode === 'ready';
   chip.hidden = !has || p === 'data';
   if (has) {
     const n = (S.changeSeq || 0) - (S.backup ? S.backup.seq || 0 : 0);
@@ -155,6 +156,7 @@ function openDraftCount(skipSetup){
   if ($('#pName') && $('#pName').value) n++;
   if (S.rcpt) n++;
   if (S.hist) n++;
+  if (drafts.isDirty('dashboard')) n++;   /* ab 1.14.0: geänderte Auswahl der Startseite */
   return n;
 }
 let resetInfo = null;
@@ -178,6 +180,7 @@ function onDatasetChange(phase){
     if (S.adding || S.addPhoto) bike.closeDraft('addBikeForm');
     S.shareReady = null; S.oemDraft = null; S.editing = {};
     nav.resetEditor();
+    dash.resetEditor();   /* ab 1.14.0: Entwurf der Startseite gehört zum alten Bestand */
     resetInfo.unres = dropForeignUnres();
     return;
   }
@@ -204,6 +207,7 @@ function renderAll(){
   if (p === 'bike' && curBike()) { bike.renderBike(); defects.renderDefects(); }
   if (S.mode === 'ready') bike.renderInventory();
   if (p === 'navigation') nav.renderEditor();
+  if (p === 'dashboard') dash.renderEditor();   /* ab 1.14.0 */
   if (p === 'data') data.renderData();
   if (p === 'stats') stats.renderStats();
   if (p === 'tracks') tracks.renderTracks();   /* ab 1.13.0 */
@@ -330,7 +334,7 @@ DB.onChange(stores => {
   /* ab 1.10.0: nur der Speicherbereich der Punkte und der Sicherheitskopie geändert (dieses oder ein anderes Fenster): Verwaltungsdaten
      neu lesen, die Seite „Daten & Sicherung“ nur neu zeichnen, wenn sich ihre Anzeige ändert */
   if (stores.size === 1 && stores.has('snapshots')) { data.refreshMeta().then(() => { if (R.route.page === 'data' && data.pointsDirty()) data.renderData(); }); return; }
-  clearTimeout(metaQ); metaQ = setTimeout(() => Promise.all([data.refreshMeta(), nav.refreshPreferences(), tracks.refreshFav()]).then(scheduleRender), 30);
+  clearTimeout(metaQ); metaQ = setTimeout(() => Promise.all([data.refreshMeta(), nav.refreshPreferences(), tracks.refreshFav(), dash.refreshDashboard()]).then(scheduleRender), 30);
 });
 
 /* ---------- Ereignisse ---------- */
@@ -348,7 +352,7 @@ document.addEventListener('click', e => {
   drafts.begin(() => { det.open = true; }, key ? [key] : []);
 }, true);
 document.addEventListener('click', async e => {
-  const t = e.target.closest('button, a[data-bikecard], a[data-nav], a[data-filehref], a[data-skip]'); if (!t) return;
+  const t = e.target.closest('button, a[data-bikecard], a[data-nav], a[data-dashlink], a[data-filehref], a[data-skip]'); if (!t) return;
   if (await nav.onClick(t)) return;
   if (t.dataset.skip) { e.preventDefault(); $('#main').focus(); return; }
   if (t.matches('a[data-filehref]')) { if (t.getAttribute('aria-disabled') === 'true') e.preventDefault(); return; }
@@ -366,7 +370,7 @@ document.addEventListener('click', async e => {
     $('#lbImg').src = u; $('#lightbox').showModal(); return;
   }
   if (t.id === 'lbClose') { $('#lightbox').close(); return; }
-  for (const h of [home.onClick, defects.onClick, data.onClick, tracks.onClick, bike.onClick]) { if (await h(t, e)) return; }
+  for (const h of [dash.onClick, home.onClick, defects.onClick, data.onClick, tracks.onClick, bike.onClick]) { if (await h(t, e)) return; }
 });
 document.addEventListener('input', e => {
   const t = e.target;
@@ -375,12 +379,13 @@ document.addEventListener('input', e => {
   nav.onInput(t);
   stats.onInput(t) || tracks.onInput(t) || defects.onInput(t) || bike.onInput(t);
 });
-document.addEventListener('change', e => { const t = e.target; if (nav.onChange(t) || tracks.onChange(t)) return; if (t.id === 'inventoryBike' || t.id === 'inventoryLow') { bike.renderInventory(); return; } defects.onChange(t) || data.onChange(t) || bike.onChange(t); });
+document.addEventListener('change', e => { const t = e.target; if (nav.onChange(t) || tracks.onChange(t) || dash.onChange(t)) return; if (t.id === 'inventoryBike' || t.id === 'inventoryLow') { bike.renderInventory(); return; } defects.onChange(t) || data.onChange(t) || bike.onChange(t); });
 document.addEventListener('submit', e => {
   const f = e.target;
   if (f.id === 'quickForm') { bike.onQuick(e); return; }
   e.preventDefault();
-  submitForm(f);
+  /* ab 1.14.0: nach „Startseite speichern“ zur Startseite, damit die neue Auswahl gleich zu sehen ist */
+  submitForm(f).then(ok => { if (ok && f.id === 'dashForm' && R.route.page === 'dashboard') toGarage(); });
 });
 /* Formular speichern (auch aus „Du hast ungespeicherte Änderungen.“ → Speichern). Ergebnis: true = ohne Prüffehler durchgelaufen */
 async function submitForm(f){
@@ -390,6 +395,7 @@ async function submitForm(f){
   try {
     return await drafts.savingRun(async () => {
       if (f.id === 'navigationForm') return nav.saveEditor();
+      if (f.id === 'dashForm') return dash.saveEditor();   /* ab 1.14.0: Startseite */
       if (f.id === 'lapForm') return tracks.submit(busy);   /* ab 1.13.0: Bestzeit */
       if (await defects.onSubmit(f, busy)) return true;
       await bike.onSubmit(f, busy);
@@ -429,7 +435,7 @@ function applyUpdate(){
 function initStatic(){
   nav.initNavigation();
   $$('form').forEach(f => f.setAttribute('novalidate', ''));
-  bike.initBikeForms(); counter.initCounter(); drafts.initDrafts(); defects.registerDefectDrafts(); tracks.register();
+  bike.initBikeForms(); counter.initCounter(); drafts.initDrafts(); defects.registerDefectDrafts(); tracks.register(); dash.register();
   bike.resetBikeForms();
 }
 async function boot(){
@@ -463,6 +469,7 @@ async function boot(){
   await data.refreshMeta();
   await nav.refreshPreferences();
   await tracks.refreshFav();   /* ab 1.13.0: Lieblingsstrecken */
+  await dash.refreshDashboard();   /* ab 1.14.0: Auswahl der Startseite */
   S.v8 = readV8Local();
   S.picked = pickedGet();   /* ab 1.7.3 (Issue #14): zuletzt bewusst geöffnetes Motorrad (dieses Fenster bzw. dieses Gerät) */
   store.emitAll();

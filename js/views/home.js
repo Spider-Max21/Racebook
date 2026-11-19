@@ -1,15 +1,22 @@
-/* Racebook – Übersicht (Startseite): Zusammenfassung, Motorradkarten (ab 1.7.3 direkt verschiebbar), „Motorrad hinzufügen“.
+/* Racebook – Übersicht (Startseite „Meine Garage“): Zusammenfassung, Motorradkarten (ab 1.7.3 direkt verschiebbar),
+   „Motorrad hinzufügen“. Ab 1.14.0 (Roadmap 11) aus Bausteinen in eigener Auswahl und Reihenfolge (../dashboard.js, Inhalte
+   ../blocks.js); ohne eigene Auswahl wie bisher Zusammenfassung und Motorräder.
    Zustände stehen immer als Text da; fehlt die Grundlage, wirkt nichts „in Ordnung“.
-   Stunden und Kilometer werden nie zusammengezählt. */
-import {esc, fmt} from '../util.js';
-import {S, bikeList, bikeName} from '../state.js';
-import {bikeStatus, garageSummary, brandOf} from '../domain.js';
-import {$, $$, imgTag, hydrate, icon, toast, errText} from '../ui.js';
+   Stunden und Kilometer werden nie zusammengezählt; keine Kosten pro Stunde. */
+import {esc, fmt, fmtDate} from '../util.js';
+import {S, bikeList, bikeName, U} from '../state.js';
+import {bikeStatus, garageSummary, brandOf, STATE_TEXT} from '../domain.js';
+import {$, $$, imgTag, hydrate, icon, toast, errText, parseRoute} from '../ui.js';
 import * as store from '../store.js';
 import {flow} from '../ops.js';
-import {plateStyle, titleOf} from './bike.js';
+import {plateStyle, titleOf, prioText} from './bike.js';
 import {countText} from '../backup.js';
 import {R} from '../registry.js';
+import {showOf, LIST_MAX} from '../dashboard.js';
+import * as blk from '../blocks.js';
+import {euro, usageText} from './stats.js';
+import {countsText, bestLine} from './tracks.js';
+import {stockUnit} from './artikel.js';
 
 export const brandLabel = b => { const br = brandOf(b); return (br && br.short) || b.brand || 'Motorrad'; };
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
@@ -50,6 +57,87 @@ function summaryHTML(sum){
     + '<div class="sum' + (sum.defects ? ' is-warn' : '') + '"><b>' + sum.defects + '</b><span>' + (sum.defects === 1 ? 'offener Mangel' : 'offene Mängel') + '</span></div>'
     + '</section>' + (extra ? '<p class="sum-note">' + esc(extra) + '</p>' : '');
 }
+/* ---------- Bausteine (ab 1.14.0, Roadmap 11) ----------
+   Je Baustein eine Karte mit Überschrift, höchstens LIST_MAX Einträgen und einem Link zur vollständigen Ansicht. Links sind echte
+   Adressen (auch zum Öffnen in einem neuen Tab); in der App führen sie über die Navigation mit Rückfrage bei ungespeicherten Eingaben. */
+const dlink = (href, text, label) => '<a class="mini dash-link" href="' + href + '" data-dashlink' + (label ? ' aria-label="' + esc(label) + '"' : '') + '>' + esc(text) + '</a>';
+const bikeHref = (id, sec) => '#/bike/' + encodeURIComponent(id) + '/' + sec;
+function dcard(id, title, body, link){
+  return '<section class="card dash-card" data-block="' + id + '" aria-labelledby="dash-' + id + '-h"><div class="dash-h"><h2 id="dash-' + id + '-h">' + esc(title) + '</h2>' + (link || '') + '</div>' + body + '</section>';
+}
+const moreText = (n, what) => n > LIST_MAX ? '<p class="hint dash-more">… und ' + (n - LIST_MAX) + ' ' + what + '.</p>' : '';
+const bikeTag = id => '<span class="hint dash-bike">' + esc(titleOf(S.bikes[id] || {})) + '</span>';
+const unitAmount = (v, b) => fmt(v, 2) + ' ' + U(b);
+const BLOCK_HTML = {
+  due(){
+    const d = blk.dueOf(), shownList = d.list.slice(0, LIST_MAX);
+    if (!d.total) return dcard('due', 'Fällige Wartung', '<p class="hint dash-none">Noch keine Wartungspunkte angelegt. Wartungsintervalle legst du am Motorrad unter „Wartungsintervalle“ an.</p>');
+    let body = shownList.length
+      ? '<ul class="dash-list">' + shownList.map(x => '<li data-due="' + esc(x.bike + ':' + x.item) + '"><a href="' + bikeHref(x.bike, 'status') + '" data-dashlink><span class="state st-' + x.s + '">' + icon(x.s) + esc(STATE_TEXT[x.s]) + '</span><span class="dash-what"><b>' + esc(x.name) + '</b>' + (x.s === 'chk' ? '' : ': ' + esc(x.text)) + '</span>' + bikeTag(x.bike) + '</a></li>').join('') + '</ul>' + moreText(d.list.length, 'weitere Punkte')
+      : '<p class="dash-none">Nichts überfällig, bald fällig oder zu prüfen.</p>';
+    const notes = [];
+    if (d.unknown) notes.push(d.unknown === 1 ? '1 Wartungspunkt hat keine Grundlage (Stand oder Datum) und gilt nicht als in Ordnung.' : d.unknown + ' Wartungspunkte haben keine Grundlage (Stand oder Datum) und gelten nicht als in Ordnung.');
+    if (d.none) notes.push((d.none === 1 ? '1 Motorrad hat' : d.none + ' Motorräder haben') + ' keine Wartungspunkte.');
+    if (notes.length) body += '<p class="hint dash-note">' + esc(notes.join(' ')) + '</p>';
+    return dcard('due', 'Fällige Wartung', body);
+  },
+  defects(){
+    const list = blk.defectsOf();
+    const body = list.length
+      ? '<ul class="dash-list">' + list.slice(0, LIST_MAX).map(d => '<li data-defect="' + esc(d.id) + '"><a href="' + bikeHref(d.bike, 'defects') + '" data-dashlink><span class="prio ' + esc(d.priority) + '">' + esc(prioText(d.priority)) + '<span class="sr"> Priorität</span></span><span class="dash-what"><b>' + esc(d.title) + '</b>' + (d.status === 'progress' ? ' <span class="hint">(in Arbeit)</span>' : '') + '</span>' + '<span class="hint dash-bike">' + esc(titleOf(S.bikes[d.bike])) + (d.date ? ' · seit ' + esc(fmtDate(d.date)) : '') + '</span></a></li>').join('') + '</ul>' + moreText(list.length, 'weitere Mängel')
+      : '<p class="dash-none">Keine offenen Mängel.</p>';
+    return dcard('defects', 'Offene Mängel', body);
+  },
+  costs(){
+    const c = blk.costsOf(), y = c.year.range.from.slice(0, 4);
+    const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+    const row = (key, label, x) => {
+      const open = x.unknownLog + x.unknownBuy;
+      const val = !x.n ? 'nichts erfasst' : x.withAmount ? '<b>' + euro(x.known) + '</b> bekannt' : 'kein Betrag bekannt';
+      return '<tr data-period="' + key + '"><th scope="row">' + esc(label) + '</th><td>' + val + (open ? '<br><span class="hint">' + (open === 1 ? '1 Posten' : open + ' Posten') + ' ohne Betrag – nicht mitgezählt (nicht als 0 €)</span>' : '') + '</td></tr>';
+    };
+    let body = '<table class="stats-tab dash-tab"><tbody>' + row('month', MONTHS[+c.month.range.from.slice(5, 7) - 1] + ' ' + y, c.month) + row('year', 'Jahr ' + y, c.year) + '</tbody></table>';
+    const per = bikeList().filter(b => c.year.byBike[b.id] != null).map(b => esc(titleOf(b)) + ' ' + euro(c.year.byBike[b.id]));
+    if (c.year.shared) per.push('Lager für mehrere, alle oder kein Motorrad ' + euro(c.year.shared));
+    if (per.length) body += '<p class="hint dash-note">Im Jahr ' + y + ' je Motorrad: ' + per.join(' · ') + '. Lagereinkäufe zählen einmal am Einkaufsdatum.</p>';
+    return dcard('costs', 'Kosten', body, dlink('#/auswertung', 'Auswertung', 'Kosten in der Auswertung ansehen'));
+  },
+  usage(){
+    const u = blk.usageOf(), y = u.range.from.slice(0, 4);
+    const body = '<ul class="dash-list dash-plain">' + u.bikes.map(x => { const t = usageText(x.u);
+      return '<li data-bike="' + esc(x.bike) + '" data-state="' + x.u.state + '"><span class="dash-what"><b>' + esc(titleOf(S.bikes[x.bike])) + '</b>: ' + esc(t.val) + '</span>' + (t.notes.length ? '<span class="hint">' + esc(t.notes.join('; ')) + '</span>' : '') + '</li>'; }).join('') + '</ul>'
+      + '<p class="hint dash-note">Gefahren im Jahr ' + y + ', über Zählerwechsel hinweg. Stunden und Kilometer werden nicht zusammengezählt.</p>';
+    return dcard('usage', 'Nutzung ' + y, body, dlink('#/auswertung', 'Auswertung', 'Nutzung in der Auswertung ansehen'));
+  },
+  rides(){
+    const list = blk.ridesOf();
+    const body = list.length
+      ? '<ul class="dash-list">' + list.slice(0, LIST_MAX).map(r => { const b = S.bikes[r.bike];
+        const what = (r.track ? r.track : 'ohne Strecke') + (r.layout ? ' (' + r.layout + ')' : '');
+        return '<li data-ride="' + esc(r.id) + '"><a href="' + bikeHref(r.bike, 'rides') + '" data-dashlink><span class="dash-what"><b>' + esc(fmtDate(r.date)) + '</b> · ' + esc(what) + ' · ' + esc(r.amount != null && r.amount > 0 ? unitAmount(r.amount, b) : 'ohne ' + (U(b) === 'km' ? 'Kilometer' : 'Fahrzeit')) + '</span>' + bikeTag(r.bike) + '</a></li>'; }).join('') + '</ul>' + moreText(list.length, 'weitere Fahrten')
+      : '<p class="dash-none">Noch keine Fahrten eingetragen.</p>';
+    return dcard('rides', 'Letzte Fahrten', body);
+  },
+  tracks(){
+    const t = blk.favTracksOf();
+    let body;
+    if (!t.fav.length) {
+      body = '<p class="hint dash-none">Noch keine Lieblingsstrecke markiert. Markieren geht unter „Strecken“ mit dem Stern; wie oft du dort warst, spielt dabei keine Rolle.</p>'
+        + (t.last ? '<p class="hint dash-note">Zuletzt gefahren: <a href="#/strecken/' + encodeURIComponent(t.last.key) + '" data-dashlink>' + esc(t.last.name) + '</a> am ' + esc(fmtDate(t.last.last)) + '</p>' : '');
+    } else body = '<ul class="dash-list">' + t.fav.slice(0, LIST_MAX).map(x => { const best = bestLine(x);
+      return '<li data-track="' + esc(x.key) + '"><a href="#/strecken/' + encodeURIComponent(x.key) + '" data-dashlink><span class="dash-what"><b>' + esc(x.name) + '</b></span><span class="hint">' + esc(countsText(x)) + (x.last ? ' · zuletzt ' + esc(fmtDate(x.last)) : '') + '</span>'
+        + (best ? '<span class="dash-best">' + icon('flag') + esc(best) + '</span>' : '') + '</a></li>'; }).join('') + '</ul>' + moreText(t.fav.length, 'weitere Lieblingsstrecken');
+    return dcard('tracks', 'Lieblingsstrecken', body, dlink('#/strecken', 'Strecken', 'Alle Strecken ansehen'));
+  },
+  stock(){
+    const list = blk.stockOf();
+    const body = list.length
+      ? '<ul class="dash-list">' + list.slice(0, LIST_MAX).map(p => { const u = stockUnit(p);
+        return '<li data-part="' + esc(p.id) + '"><a href="#/lager/' + encodeURIComponent(p.id) + '" data-dashlink><span class="dash-what"><b>' + esc(p.name || 'Artikel') + '</b></span><span class="hint">' + fmt(p.qty, 0) + (u ? ' ' + esc(u) : '') + ' im Vorrat, nachkaufen ab ' + fmt(p.min, 0) + '</span></a></li>'; }).join('') + '</ul>' + moreText(list.length, 'weitere Artikel')
+      : '<p class="dash-none">' + (S.parts.length ? 'Nichts nachzukaufen.' : 'Das Lager ist noch leer.') + '</p>';
+    return dcard('stock', 'Nachzukaufen', body, dlink('#/lager', 'Lager', 'Lager ansehen'));
+  }
+};
 export function renderHome(){
   const el = $('#homeBody'); if (!el) return;
   if (drag) { renderLater = true; return; }   /* während eine Karte gezogen wird, nicht neu zeichnen (danach sofort) */
@@ -64,15 +152,20 @@ export function renderHome(){
     return;
   }
   const multi = bikes.length > 1;
-  parts.push(summaryHTML(garageSummary()));
-  /* ab 1.7.3 (Issue #14): keine globalen Knöpfe „Fahrt eintragen“/„Wartung eintragen“ mehr (Erfassung am Motorrad) und kein
-     großer Sicherungshinweis unten (Status oben in der Kopfleiste, Daten & Sicherung über „Mehr“). Reihenfolge direkt an den
-     Karten: lange drücken und ziehen oder die drei Punkte an der Karte. */
-  const cards = shown(); shownOrders = {}; cards.forEach(b => { shownOrders[b.id] = b.order == null ? null : b.order; });
-  parts.push('<h2 class="sr">Motorräder</h2><ul class="cards" id="bikeCards">' + cards.map((b, i) => bikeCard(b, multi ? {i, n: bikes.length} : null)).join('') + '</ul>');
-  if (multi) parts.push('<p class="hint reorder-hint" id="reorderHint">Reihenfolge ändern: Karte lange drücken und ziehen – oder die drei Punkte an der Karte antippen.</p>');
-  parts.push('<p class="sr" aria-live="polite" id="orderLive">' + esc(S.orderMsg || '') + '</p>');
-  parts.push('<section class="actions" aria-label="Aktionen"><button class="btn" type="button" id="addBikeBtn">' + icon('plus') + 'Motorrad hinzufügen</button></section>');
+  /* ab 1.14.0 (Roadmap 11): Bausteine in der gespeicherten Auswahl und Reihenfolge; „Motorräder“ ist immer dabei */
+  showOf(S.dashboard).forEach(id => {
+    if (id === 'summary') { parts.push(summaryHTML(garageSummary())); return; }
+    if (id !== 'bikes') { const h = BLOCK_HTML[id] && BLOCK_HTML[id](); if (h) parts.push(h); return; }
+    /* ab 1.7.3 (Issue #14): keine globalen Knöpfe „Fahrt eintragen“/„Wartung eintragen“ mehr (Erfassung am Motorrad) und kein
+       großer Sicherungshinweis unten (Status oben in der Kopfleiste, Daten & Sicherung über „Mehr“). Reihenfolge direkt an den
+       Karten: lange drücken und ziehen oder die drei Punkte an der Karte. */
+    const cards = shown(); shownOrders = {}; cards.forEach(b => { shownOrders[b.id] = b.order == null ? null : b.order; });
+    parts.push('<h2 class="sr">Motorräder</h2><ul class="cards" id="bikeCards">' + cards.map((b, i) => bikeCard(b, multi ? {i, n: bikes.length} : null)).join('') + '</ul>');
+    if (multi) parts.push('<p class="hint reorder-hint" id="reorderHint">Reihenfolge ändern: Karte lange drücken und ziehen – oder die drei Punkte an der Karte antippen.</p>');
+    parts.push('<p class="sr" aria-live="polite" id="orderLive">' + esc(S.orderMsg || '') + '</p>');
+    parts.push('<section class="actions" aria-label="Aktionen"><button class="btn" type="button" id="addBikeBtn">' + icon('plus') + 'Motorrad hinzufügen</button></section>');
+  });
+  parts.push('<p class="dash-edit"><button class="btn ghost" type="button" id="dashEditBtn" data-nav="dashboard">' + icon('sort') + 'Startseite anpassen</button></p>');
   el.innerHTML = parts.join('');
   el.classList.toggle('order-busy', !!S.orderBusy);
   hydrate(el);
@@ -247,6 +340,8 @@ export function onClick(t, e){
   if (t.id === 'cardMenuClose') { $('#cardMenuDlg').close(); return true; }
   if (t.dataset.bikecard) { e.preventDefault(); if (drag || eatClick) return true; R.go({page: 'bike', bike: t.dataset.bikecard, section: 'status'}); return true; }
   if (t.id === 'addBikeBtn') { R.go({page: 'add'}); return true; }
+  /* ab 1.14.0: Links in den Bausteinen der Startseite */
+  if (t.dataset.dashlink != null) { e.preventDefault(); R.go(parseRoute(t.getAttribute('href'))); return true; }
   if (t.id === 'migrateStart') { R.startMigration(); return true; }
   return false;
 }

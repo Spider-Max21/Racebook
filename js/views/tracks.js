@@ -68,7 +68,7 @@ function favBtn(t){
     + '<span aria-hidden="true">' + (t.fav ? '★' : '☆') + '</span><span>' + (t.fav ? 'Lieblingsstrecke' : 'Markieren') + '</span></button>';
 }
 /* Kurzfassung: Besuche, Trainingstage, Fahrten, Turns */
-function countsText(t){
+export function countsText(t){
   const parts = [plural(t.visits.length, 'Besuch', 'Besuche'), plural(t.days, 'Trainingstag', 'Trainingstage'), plural(t.rides, 'Fahrt', 'Fahrten')];
   if (t.rides) parts.push(turnsText(t.turns));
   return parts.join(' · ');
@@ -83,7 +83,7 @@ function amountText(t){
   return ids.map(id => { const x = t.byBike[id]; return titleOf(S.bikes[id]) + ': ' + (x.n > x.without ? unitAmount(x.amount, x.unit) : 'ohne Angabe') + (x.without && x.n > x.without ? ' (' + plural(x.without, 'Fahrt', 'Fahrten') + ' ohne Angabe)' : ''); }).join(' · ');
 }
 /* Bestzeit je Variante; ist sie nicht eindeutig (unterschiedlich genaue Zeiten, siehe T.lapBest), stehen alle möglichen da */
-function bestLine(t){
+export function bestLine(t){
   const one = l => T.fmtLap(l.ms, l.dig) + ' (' + titleOf(S.bikes[l.bike]) + ', ' + fmtDate(l.date) + ')';
   const g = t.laps.groups.map(x => x.layout + ': ' + x.best.map(one).join(' oder ') + (x.best.length > 1 ? ', nicht eindeutig' : ''));
   if (t.laps.open.length) g.push(plural(t.laps.open.length, 'Zeit', 'Zeiten') + ' ohne Variante');

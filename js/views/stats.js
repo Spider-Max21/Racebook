@@ -7,7 +7,7 @@ import {$} from '../ui.js';
 import * as st from '../stats.js';
 
 const titleOf = b => b.nickname || ((b.brand || '') + ' ' + (b.model || '')).trim() || 'Motorrad';
-const euro = c => (c / 100).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €';
+export const euro = c => (c / 100).toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €';
 const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
 const monthName = k => MONTHS[+k.slice(5, 7) - 1] + ' ' + k.slice(0, 4);
 const SHARED = {alle: 'allen Motorrädern', mehrere: 'mehreren Motorrädern', keins: 'keinem Motorrad'};
@@ -72,22 +72,27 @@ export function renderStats(){
   h += '<div class="card stats-card" id="statsUse"><h2>Nutzung</h2><p class="hint">Gefahren im Zeitraum, über Zählerwechsel hinweg (Gesamtlaufleistung). Gezählt wird nur, was zwischen zwei bekannten Ständen im Zeitraum liegt; liegt zwischen zwei Ständen der Beginn oder das Ende des Zeitraums, ist offen, wann gefahren wurde.</p>';
   if (!ub.length) h += '<p class="hint">Noch kein Motorrad angelegt.</p>';
   else h += '<table class="stats-tab" id="statsUsage"><tbody>' + ub.map(x => {
-    const u = st.usage(x, S.log, S.rides, range), unit = u.unit === 'km' ? 'km' : 'h';
-    const n = v => fmt(v, 2) + ' ' + unit;
-    const val = u.state === 'ok' ? n(u.value) : u.state === 'range' ? (u.max != null ? fmt(u.value, 2) + ' bis ' + n(u.max) : 'mindestens ' + n(u.value)) : u.state === 'unclear' ? 'unklar' : 'unbekannt';
-    const notes = [];
-    if (u.state === 'unclear') notes.push('Stand wurde nach unten berichtigt');
-    else {
-      if (u.from) notes.push('vor dem ersten bekannten Stand am ' + fmtDate(u.from) + ' ist nichts bekannt');
-      if (u.until) notes.push('nach dem letzten bekannten Stand am ' + fmtDate(u.until) + ' ist nichts bekannt');
-      u.cross.forEach(g => notes.push(n(g.v) + ' zwischen ' + fmtDate(g.a) + ' und ' + fmtDate(g.z) + ' lassen sich nicht genauer zuordnen'));
-      if (u.state === 'unknown' && !notes.length) notes.push('zu wenige bekannte Stände');
-    }
-    if (u.rides.n) notes.push('in Fahrten erfasst: ' + n(u.rides.sum) + ' (' + u.rides.n + (u.rides.n === 1 ? ' Fahrt' : ' Fahrten') + ')');
+    const u = st.usage(x, S.log, S.rides, range), {val, notes} = usageText(u);
     return '<tr data-bike="' + esc(x.id) + '" data-state="' + u.state + '"><th scope="row">' + esc(titleOf(x)) + '</th><td><b>' + esc(val) + '</b>' + (notes.length ? '<br><span class="hint">' + esc(notes.join('; ')) + '</span>' : '') + '</td></tr>';
   }).join('') + '</tbody></table>';
   h += '</div>';
   setHTML(box, h);
+}
+
+/* Nutzung als Text (auch für die Startseite, ab 1.14.0): Wert nur aus Belegtem („mindestens“, „bis“, „unbekannt“, „unklar“) und Hinweise */
+export function usageText(u){
+  const unit = u.unit === 'km' ? 'km' : 'h', n = v => fmt(v, 2) + ' ' + unit;
+  const val = u.state === 'ok' ? n(u.value) : u.state === 'range' ? (u.max != null ? fmt(u.value, 2) + ' bis ' + n(u.max) : 'mindestens ' + n(u.value)) : u.state === 'unclear' ? 'unklar' : 'unbekannt';
+  const notes = [];
+  if (u.state === 'unclear') notes.push('Stand wurde nach unten berichtigt');
+  else {
+    if (u.from) notes.push('vor dem ersten bekannten Stand am ' + fmtDate(u.from) + ' ist nichts bekannt');
+    if (u.until) notes.push('nach dem letzten bekannten Stand am ' + fmtDate(u.until) + ' ist nichts bekannt');
+    u.cross.forEach(g => notes.push(n(g.v) + ' zwischen ' + fmtDate(g.a) + ' und ' + fmtDate(g.z) + ' lassen sich nicht genauer zuordnen'));
+    if (u.state === 'unknown' && !notes.length) notes.push('zu wenige bekannte Stände');
+  }
+  if (u.rides.n) notes.push('in Fahrten erfasst: ' + n(u.rides.sum) + ' (' + u.rides.n + (u.rides.n === 1 ? ' Fahrt' : ' Fahrten') + ')');
+  return {val, notes};
 }
 
 /* Auswahl geändert: merken (nur auf diesem Gerät) und neu zeichnen */

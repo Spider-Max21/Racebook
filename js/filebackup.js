@@ -159,7 +159,7 @@ async function writeLocked(force){
   const seq = info ? info.changeSeq || 0 : 0, epoch = info && typeof info.epoch === 'string' ? info.epoch : '';
   if (!force && c.last && c.last.seq === seq && c.last.epoch === epoch) return {result: 'same'};
   const b = await buildBackup();
-  if (!b.counts.bikes && !b.counts.parts) return {result: 'empty'};
+  if (!b.counts.bikes && !b.counts.parts && !b.prefs) return {result: 'empty'};   /* ab 1.14.0: persönliche Einstellungen allein sind Bestand */
   /* Einrichtung noch dieselbe? (nicht inzwischen beendet oder eine andere Datei gewählt, auch nicht in einem anderen Fenster).
      Vermerkt wird nur über saveIf: geprüft wird dort noch einmal in derselben Transaktion. */
   const cur = async () => { const m = await DB.getMeta(KEY); return m && m.since === c.since ? m : null; };

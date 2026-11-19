@@ -5,11 +5,11 @@
 import * as DB from './db.js';
 import {makeZip, readZip, isZip} from './zip.js';
 import {sha256, sniff} from './images.js';
-import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans, needsV6, needsV7, needsV8, needsV10, needsV11, needsV12, needsV13, needsV14, needsV15, needsV16, ZIP_FORMAT, ZIP_VERSION, ZIP_VERSION_V15, ZIP_VERSION_V14, ZIP_VERSION_V13, ZIP_VERSION_V12, ZIP_VERSION_V11, ZIP_VERSION_V10, ZIP_VERSION_NAV, ZIP_VERSION_V8, ZIP_VERSION_POS, ZIP_VERSION_METER, ZIP_VERSION_ORPH, ZIP_VERSION_PLAIN, DEP_COLLS, KEYS, NAMES} from './domain.js';
+import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans, needsV6, needsV7, needsV8, needsV10, needsV11, needsV12, needsV13, needsV14, needsV15, needsV16, needsV17, ZIP_FORMAT, ZIP_VERSION, ZIP_VERSION_V16, ZIP_VERSION_V15, ZIP_VERSION_V14, ZIP_VERSION_V13, ZIP_VERSION_V12, ZIP_VERSION_V11, ZIP_VERSION_V10, ZIP_VERSION_NAV, ZIP_VERSION_V8, ZIP_VERSION_POS, ZIP_VERSION_METER, ZIP_VERSION_ORPH, ZIP_VERSION_PLAIN, DEP_COLLS, KEYS, NAMES} from './domain.js';
 import {COLLS} from './state.js';
 import {pad, canon, isISO, fmtDate} from './util.js';
 
-export const APP_VERSION = '1.13.0';
+export const APP_VERSION = '1.14.0';
 export const V8_LOCAL_KEY = 'wh-garage-local';
 const MAX_JSON = 60 * 1024 * 1024;
 const enc = new TextEncoder();
@@ -51,7 +51,8 @@ export async function buildBackup(){
   /* Version nur so hoch wie nötig: ältere App-Versionen können Sicherungen ohne neue Angaben weiter lesen */
   const nav = (recs.meta || []).find(m => m.k === 'navigation') || null;
   const trk = (recs.meta || []).find(m => m.k === 'tracks') || null;   /* ab 1.13.0: Lieblingsstrecken */
-  const json = {format: ZIP_FORMAT, version: needsV16(next, trk) ? ZIP_VERSION : needsV15(next) ? ZIP_VERSION_V15 : needsV14(next) ? ZIP_VERSION_V14 : needsV13(next) ? ZIP_VERSION_V13 : needsV12(next) ? ZIP_VERSION_V12 : needsV11(next) ? ZIP_VERSION_V11 : needsV10(next) ? ZIP_VERSION_V10 : nav ? ZIP_VERSION_NAV : needsV8(next) ? ZIP_VERSION_V8 : needsV7(next) ? ZIP_VERSION_POS : needsV6(next) ? ZIP_VERSION_METER : sp.count ? ZIP_VERSION_ORPH : ZIP_VERSION_PLAIN, app: APP_VERSION, exportiert: now.toISOString(), stand: {changeSeq: info.changeSeq || 0}};
+  const dsh = (recs.meta || []).find(m => m.k === 'dashboard') || null;   /* ab 1.14.0: Auswahl der Startseite */
+  const json = {format: ZIP_FORMAT, version: needsV17(dsh) ? ZIP_VERSION : needsV16(next, trk) ? ZIP_VERSION_V16 : needsV15(next) ? ZIP_VERSION_V15 : needsV14(next) ? ZIP_VERSION_V14 : needsV13(next) ? ZIP_VERSION_V13 : needsV12(next) ? ZIP_VERSION_V12 : needsV11(next) ? ZIP_VERSION_V11 : needsV10(next) ? ZIP_VERSION_V10 : nav ? ZIP_VERSION_NAV : needsV8(next) ? ZIP_VERSION_V8 : needsV7(next) ? ZIP_VERSION_POS : needsV6(next) ? ZIP_VERSION_METER : sp.count ? ZIP_VERSION_ORPH : ZIP_VERSION_PLAIN, app: APP_VERSION, exportiert: now.toISOString(), stand: {changeSeq: info.changeSeq || 0}};
   COLLS.forEach(c => { json[KEYS[c]] = (recs[c] || []).filter(d => c === 'bikes' || sp.clean[c][d.id]).sort(byId); });
   if (sp.count) {
     json.verwaist = {};
@@ -59,6 +60,7 @@ export async function buildBackup(){
   }
   if (nav) json.navigation = nav;
   if (trk) json.tracks = {k: 'tracks', fav: trk.fav.slice()};
+  if (dsh) json.dashboard = {k: 'dashboard', show: dsh.show.slice()};
   json.dateien = dateien;
   json.fehlend = fehlend;
   const c = counts(next);
@@ -71,7 +73,9 @@ export async function buildBackup(){
   const blob = await makeZip([{name: 'racebook.json', data: enc.encode(JSON.stringify(json, null, 1)), date: now}]
     .concat(files.map(f => ({name: 'dateien/' + f.id, data: f.blob, date: new Date(f.created || now)})))
     .concat([{name: 'LIESMICH.txt', data: enc.encode(readme), date: now}]));
-  return {blob, name: 'racebook-sicherung-' + stamp(now) + '.zip', seq: info.changeSeq || 0, at: now.getTime(), counts: c, fileCount: dateien.length, missing: missingText,
+  /* prefs: persönliche Einstellungen in der Sicherung (Menübelegung, Lieblingsstrecken, Auswahl der Startseite) – auch ohne Motorräder
+     und Lagerartikel ein sicherbarer Bestand (ab 1.14.0, Prüfbefund P2 in PR #28) */
+  return {blob, name: 'racebook-sicherung-' + stamp(now) + '.zip', seq: info.changeSeq || 0, at: now.getTime(), counts: c, prefs: !!(nav || trk || dsh), fileCount: dateien.length, missing: missingText,
     epoch: typeof info.epoch === 'string' ? info.epoch : '', orphans: sp.count};
 }
 /* Sicherung vermerken, aber nur für den Bestand, aus dem sie erstellt wurde */
@@ -85,7 +89,7 @@ function draftOf(r, extra){
   const bikes = Object.values(r.next.bikes).map(b => ((b.nickname ? b.nickname + ' – ' : '') + (b.brand + ' ' + (b.model || '')).trim() + (b.year ? ' (' + b.year + ')' : '')));
   const orphans = r.orphans || null;
   const orphanCount = orphans ? DEP_COLLS.reduce((n, k) => n + Object.keys(orphans[k] || {}).length, 0) : 0;
-  return Object.assign({navigation: r.navigation || null, tracks: r.tracks || null, next: r.next, orphans, orphanCount, files: r.files || [], missing: r.missing || [], counts: c, bikes, source: r.source, version: r.version,
+  return Object.assign({navigation: r.navigation || null, tracks: r.tracks || null, dashboard: r.dashboard || null, next: r.next, orphans, orphanCount, files: r.files || [], missing: r.missing || [], counts: c, bikes, source: r.source, version: r.version,
     exported: isISO(String(r.exported || '').slice(0, 10)) ? r.exported : ''}, extra || {});
 }
 export async function readBackupFile(file){
@@ -133,7 +137,7 @@ async function readZipBackup(blob, name){
 function asArrays(next){ const o = {}; COLLS.forEach(c => { o[c] = Object.keys(next[c] || {}).map(id => Object.assign({}, next[c][id], {id})); }); return o; }
 
 /* Nach dem Schreiben alles zurücklesen und mit der geprüften Vorlage vergleichen */
-export async function verifyStored(next, files, navigation, tracks){
+export async function verifyStored(next, files, navigation, tracks, dashboard){
   const back = await DB.readRecords(COLLS.concat(['files']));
   for (const c of COLLS) {
     const want = next[c] || {}, got = back[c] || [];
@@ -153,6 +157,7 @@ export async function verifyStored(next, files, navigation, tracks){
   }
   if (navigation !== undefined && canon((await DB.getMeta('navigation')) || null) !== canon(navigation)) return 'Die Menübelegung weicht nach dem Speichern ab.';
   if (tracks !== undefined && canon((await DB.getMeta('tracks')) || null) !== canon(tracks)) return 'Die Lieblingsstrecken weichen nach dem Speichern ab.';
+  if (dashboard !== undefined && canon((await DB.getMeta('dashboard')) || null) !== canon(dashboard)) return 'Die Auswahl der Startseite weicht nach dem Speichern ab.';
   return '';
 }
 
@@ -164,11 +169,11 @@ export async function applyDraft(draft, how){
   if (draft.source === 'v8-local') meta.push({k: 'migration', from: 'v8-local', at: Date.now(), counts: draft.counts, verified: false, sourceKept: true});
   const exportedAt = draft.exported ? Date.parse(draft.exported) : NaN;
   /* Scheitert dieser Schritt, ist nichts verändert. */
-  const res = await DB.replaceAll(next, draft.files || [], {reason: how || 'Sicherung eingespielt', refsOf, meta, navigation: draft.navigation || null, tracks: draft.tracks || null,
+  const res = await DB.replaceAll(next, draft.files || [], {reason: how || 'Sicherung eingespielt', refsOf, meta, navigation: draft.navigation || null, tracks: draft.tracks || null, dashboard: draft.dashboard || null,
     importSeq: draft.source === 'zip' && !isNaN(exportedAt) ? {at: exportedAt, name: draft.fileName || 'Sicherung', size: draft.size || 0} : null});
   /* Ab hier ist der neue Bestand gespeichert: Abweichungen ehrlich melden, nie „unverändert“ behaupten */
   let bad;
-  try { bad = await verifyStored(all, draft.files, draft.navigation || null, draft.tracks || null); } catch (e) { bad = 'Die Prüfung konnte nicht abgeschlossen werden.'; }
+  try { bad = await verifyStored(all, draft.files, draft.navigation || null, draft.tracks || null, draft.dashboard || null); } catch (e) { bad = 'Die Prüfung konnte nicht abgeschlossen werden.'; }
   if (bad) { const e = err('Die Sicherung wurde eingespielt, aber beim Nachprüfen gab es eine Abweichung: ' + bad + ' Der vorherige Stand liegt als Sicherheitskopie unter „Daten & Sicherung“.'); e.committed = true; throw e; }
   if (draft.source === 'v8-local') await DB.setMeta({k: 'migration', from: 'v8-local', at: Date.now(), counts: draft.counts, verified: true, sourceKept: true});
   return res;
@@ -184,10 +189,10 @@ export async function restoreSnapshot(){
   const s = await DB.getSnapshot();
   if (!s) throw err('Es gibt keine Sicherheitskopie.');
   const next = {}; COLLS.forEach(c => { next[c] = s.data[c] || []; });
-  await DB.replaceAll(next, [], {reason: 'Vor dem Wiederherstellen', refsOf, navigation: s.navigation || null, tracks: s.tracks || null});
+  await DB.replaceAll(next, [], {reason: 'Vor dem Wiederherstellen', refsOf, navigation: s.navigation || null, tracks: s.tracks || null, dashboard: s.dashboard || null});
   const back = toNext(next);
   let bad;
-  try { bad = await verifyStored(back, [], s.navigation || null, s.tracks || null); } catch (e) { bad = 'Die Prüfung konnte nicht abgeschlossen werden.'; }
+  try { bad = await verifyStored(back, [], s.navigation || null, s.tracks || null, s.dashboard || null); } catch (e) { bad = 'Die Prüfung konnte nicht abgeschlossen werden.'; }
   if (bad) { const e = err('Die Sicherheitskopie wurde zurückgeholt, aber beim Nachprüfen gab es eine Abweichung: ' + bad); e.committed = true; throw e; }
 }
 

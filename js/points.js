@@ -27,8 +27,9 @@ const delay = k => { const t = T(), d = t && t.pointDelays && t.pointDelays[k]; 
 export const enabled = () => { const t = T(); return !t || !!t.points; };
 
 /* Prüfsumme über den ganzen Stand des Punkts */
-/* Ab 1.13.0 auch die Lieblingsstrecken – nur wenn der Punkt welche enthält, damit ältere Punkte ihre Prüfsumme behalten */
-const sumOf = p => sha256(new Blob([canon(Object.assign({data: p.data || {}, navigation: p.navigation || null, epoch: p.epoch || '', changeSeq: p.changeSeq || 0}, p.tracks ? {tracks: p.tracks} : {}))]));
+/* Ab 1.13.0 auch die Lieblingsstrecken, ab 1.14.0 die Auswahl der Startseite – je nur, wenn der Punkt sie enthält, damit ältere Punkte
+   ihre Prüfsumme behalten */
+const sumOf = p => sha256(new Blob([canon(Object.assign({data: p.data || {}, navigation: p.navigation || null, epoch: p.epoch || '', changeSeq: p.changeSeq || 0}, p.tracks ? {tracks: p.tracks} : {}, p.dashboard ? {dashboard: p.dashboard} : {}))]));
 
 /* Welche geprüften Punkte bleiben: die neuesten und je Kalendertag (Ortszeit) der letzten Tage der letzte.
    Ab Prüfbefund PR #24: getrennt für vollständige Punkte und für Punkte, in denen beim Anlegen schon Fotos oder PDFs fehlten
@@ -97,7 +98,7 @@ export async function listPoints(){
     let ok = false;
     try { ok = !!p.sum && (await sumOf(p)) === p.sum; } catch (e) {}
     out.push({id: p.id, created: p.created, epoch: p.epoch, changeSeq: p.changeSeq, counts: countsOf(p.data), bikes: bikeNames(p.data),
-      files: (p.files || []).length, missing: (p.missing || []).length, navigation: !!p.navigation, tracks: !!p.tracks, ok});
+      files: (p.files || []).length, missing: (p.missing || []).length, navigation: !!p.navigation, tracks: !!p.tracks, dashboard: !!p.dashboard, ok});
   }
   return out;
 }
@@ -111,10 +112,10 @@ export async function restorePoint(id){
   try { bad = await verifyPoint(id, p.sum, true); } catch (e) { bad = 'Die Prüfung konnte nicht abgeschlossen werden.'; }
   if (bad) throw err('Dieser Wiederherstellungspunkt ist beschädigt und wird nicht verwendet: ' + bad + ' Es wurde nichts verändert.');
   const next = {}; COLLS.forEach(c => { next[c] = (p.data[c] || []).slice(); });
-  await DB.replaceAll(next, [], {reason: 'Vor dem Wiederherstellen eines Punkts', refsOf, navigation: p.navigation || null, tracks: p.tracks || null});
+  await DB.replaceAll(next, [], {reason: 'Vor dem Wiederherstellen eines Punkts', refsOf, navigation: p.navigation || null, tracks: p.tracks || null, dashboard: p.dashboard || null});
   /* Ab hier ist der Stand ersetzt: Abweichungen ehrlich melden */
   try {
-    bad = await verifyStored(toNext(next), [], p.navigation || null, p.tracks || null);
+    bad = await verifyStored(toNext(next), [], p.navigation || null, p.tracks || null, p.dashboard || null);
     if (!bad) for (const f of p.files || []) { const r = await DB.get('files', f.id); if (!r || !(r.blob instanceof Blob) || r.blob.size !== f.size) { bad = 'Ein Foto oder PDF fehlt.'; break; } }
   } catch (e) { bad = 'Die Prüfung konnte nicht abgeschlossen werden.'; }
   if (bad) { const e = err('Der Punkt wurde wiederhergestellt, aber beim Nachprüfen gab es eine Abweichung: ' + bad + ' Der vorherige Stand liegt als Sicherheitskopie unter „Daten & Sicherung“.'); e.committed = true; throw e; }

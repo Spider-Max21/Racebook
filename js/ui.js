@@ -149,6 +149,7 @@ export function parseRoute(h){
   if (p[0] === 'bike' && p[1]) return {page: 'bike', bike: p[1], section: p[2] === 'garage' ? 'vehicle' : SECTIONS.some(s => s[0] === p[2]) ? p[2] : 'status'};
   if (p[0] === 'lager') return p[1] ? {page: 'inventory', part: p[1]} : {page: 'inventory'};   /* ab 1.7.1: Artikeldetails */
   if (p[0] === 'menue') return {page: 'navigation'};
+  if (p[0] === 'startseite') return {page: 'dashboard'};   /* ab 1.14.0: Startseite anpassen */
   if (p[0] === 'auswertung') return {page: 'stats'};   /* ab 1.12.0: Kosten und Nutzung */
   if (p[0] === 'strecken') return p[1] ? {page: 'tracks', track: T_KEY(p[1])} : {page: 'tracks'};   /* ab 1.13.0: Strecken und Bestzeiten */
   if (p[0] === 'einstellungen') return {page: 'data'};
@@ -161,6 +162,7 @@ export function routeHash(r){
   if (r.page === 'bike') return '#/bike/' + encodeURIComponent(r.bike) + '/' + (r.section || 'status');
   if (r.page === 'inventory') return '#/lager' + (r.part ? '/' + encodeURIComponent(r.part) : '');
   if (r.page === 'navigation') return '#/menue';
+  if (r.page === 'dashboard') return '#/startseite';
   if (r.page === 'stats') return '#/auswertung';
   if (r.page === 'tracks') return '#/strecken' + (r.track ? '/' + encodeURIComponent(r.track) : '');
   if (r.page === 'data') return '#/einstellungen';

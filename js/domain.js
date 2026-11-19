@@ -4,6 +4,7 @@
 import {esc, pad, str, fmt, eur, uid, clone, reEsc, validId, safeUrl, parseNum, num, turns, isISO, todayISO, dayNum,
   fromDayNum, shiftDate, addMonths, fmtDate, hexRgb, rgbHex, mixHex, lum, contrast, towards, onColor, canon, same, subOf, MAX_BUYS} from './util.js';
 import {navigationOf} from './preferences.js';
+import {dashboardOf} from './dashboard.js';
 import {tracksOf, nameOf, TRACK_MAX, LAYOUT_MAX, LAP_NOTE_MAX, MAX_LAPS, LAP_MAX_MS, TURNS_MAX} from './tracks.js';
 import {S, COLLS, bikeList, curBike, U, bikeName} from './state.js';
 import {parseWork, ivProposal, workPos, workEntry} from './work.js';
@@ -63,8 +64,11 @@ export const ZIP_FORMAT = 'racebook-backup';
    beim Einlesen still verwerfen; deshalb lehnt es Version 15 ab.
    Ab 1.13.0 Version 16, wenn ein Motorrad Bestzeiten hat (laps), eine Fahrt eine Streckenvariante oder Turns (layout, turns) oder
    Lieblingsstrecken markiert sind (tracks, Roadmap 8). 1.12.x würde sie beim Einlesen still verwerfen; deshalb lehnt es Version 16 ab.
-   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 bzw. 15. */
-export const ZIP_VERSION = 16;
+   Ab 1.14.0 Version 17, wenn eine eigene Auswahl der Startseite gespeichert ist (dashboard, Roadmap 11). 1.13.x würde sie beim
+   Einlesen still verwerfen; deshalb lehnt es Version 17 ab.
+   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 bzw. 16. */
+export const ZIP_VERSION = 17;
+export const ZIP_VERSION_V16 = 16;
 export const ZIP_VERSION_V15 = 15;
 export const ZIP_VERSION_V14 = 14;
 export const ZIP_VERSION_V13 = 13;
@@ -113,6 +117,8 @@ export const needsV15 = next => Object.values((next && next.setups) || {}).some(
 /* ab 1.13.0 (Roadmap 8): Bestzeiten am Motorrad, Variante oder Turns einer Fahrt, Lieblingsstrecken (meta 'tracks') */
 export const hasV16Bike = b => !!b && typeof b === 'object' && Array.isArray(b.laps) && b.laps.length > 0;
 export const hasV16Ride = r => !!r && typeof r === 'object' && ((r.layout != null && r.layout !== '') || r.turns != null);
+/* ab 1.14.0 (Roadmap 11): eigene Auswahl der Startseite (meta 'dashboard') */
+export const needsV17 = dashboard => !!dashboard;
 export const needsV16 = (next, tracks) => !!tracks || Object.values((next && next.bikes) || {}).some(hasV16Bike) || Object.values((next && next.rides) || {}).some(hasV16Ride);
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
@@ -1251,8 +1257,10 @@ export function validateZipJson(d){
   if (d.version < 10 && teile.some(hasV10Part)) throw new Error('Die Sicherung ist beschädigt (Artikelangaben oder Artikelbilder in einer Sicherung vor Version 10).');
   if (d.version < 11 && teile.some(hasV11Part)) throw new Error('Die Sicherung ist beschädigt (Mehrfachzuordnung oder Einkaufspreise in einer Sicherung vor Version 11).');
   if (d.version < 12 && teile.some(hasV12Part)) throw new Error('Die Sicherung ist beschädigt (Einkäufe aus Rechnungsfotos in einer Sicherung vor Version 12).');
+  if (d.version < 17 && d.dashboard != null) throw new Error('Die Sicherung ist beschädigt (Auswahl der Startseite in einer Sicherung vor Version 17).');
   const navigation = navigationOf(d.navigation);
   const tracks = tracksOf(d.tracks);
+  const dashboard = dashboardOf(d.dashboard);
   const map = {}; COLLS.forEach(k => { map[k] = d[KEYS[k]]; });
   const next = strictCollections(map);
   const orphans = strictOrphans(d.verwaist, next);
@@ -1279,7 +1287,7 @@ export function validateZipJson(d){
   fileRefs(all).forEach((what, id) => { if (seen.has(id)) needed.add(id); else if (known.has(id)) missing.push(what); else broken.push(what); });
   if (broken.length) throw new Error('In der Sicherung fehlen Anhänge: ' + broken.join('; ') + '.');
   const meta = d.stand && typeof d.stand === 'object' ? d.stand : {};
-  return {next, navigation, tracks, orphans, missing, files: files.filter(f => needed.has(f.id)), needed, source: 'zip', version: d.version,
+  return {next, navigation, tracks, dashboard, orphans, missing, files: files.filter(f => needed.has(f.id)), needed, source: 'zip', version: d.version,
     exported: typeof d.exportiert === 'string' ? d.exportiert : '', changeSeq: Number.isInteger(meta.changeSeq) ? meta.changeSeq : null};
 }
 

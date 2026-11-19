@@ -25,7 +25,7 @@ export const REC = ['bikes', 'log', 'rides', 'setups', 'parts', 'defects'];
 /* Bereiche, deren Einträge immer zu einem Motorrad gehören (Teile: Motorrad oder 'both') */
 export const DEP = ['log', 'rides', 'setups', 'defects'];
 /* Persönliche Einstellungen in den Verwaltungsdaten: gehören zum Bestand (Sicherung, Wiederherstellungspunkte, Ersetzen) */
-export const PREF_KEYS = ['navigation', 'tracks'];
+export const PREF_KEYS = ['navigation', 'tracks', 'dashboard'];   /* ab 1.14.0: Auswahl der Startseite */
 export const newEpoch = () => Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 
 const T = () => (typeof window !== 'undefined' && window.__T) || null;
@@ -215,7 +215,7 @@ export function commit(ops, opts){
     tx.oncomplete = () => {
       done = true;
       resolve(result);
-      /* Verwaltungsdaten nur melden, wenn persönliche Einstellungen dabei sind (Menübelegung, ab 1.13.0 Lieblingsstrecken) */
+      /* Verwaltungsdaten nur melden, wenn persönliche Einstellungen dabei sind (Menübelegung, ab 1.13.0 Lieblingsstrecken, ab 1.14.0 Startseite) */
       const touched = Array.from(stores).filter(s => s !== 'meta' || ops.some(o => o.store === 'meta' && (o.value ? PREF_KEYS.includes(o.value.k) : PREF_KEYS.includes(o.id))));
       if (touched.length) {
         changeCbs.forEach(cb => cb(new Set(touched), 'local'));
@@ -357,7 +357,7 @@ export function commit(ops, opts){
     const checkMeta = next => {
       if (!opts.expectMeta) { next(); return; }
       const r = tx.objectStore('meta').get(opts.expectMeta.k);
-      r.onsuccess = () => { if (canon(r.result || null) !== canon(opts.expectMeta.value || null)) { fail({code:'changed', message: opts.expectMeta.k === 'tracks' ? 'Die Lieblingsstrecken wurden in einem anderen Fenster geändert.' : 'Die Menübelegung wurde in einem anderen Fenster geändert.'}); return; } next(); };
+      r.onsuccess = () => { if (canon(r.result || null) !== canon(opts.expectMeta.value || null)) { fail({code:'changed', message: opts.expectMeta.k === 'tracks' ? 'Die Lieblingsstrecken wurden in einem anderen Fenster geändert.' : opts.expectMeta.k === 'dashboard' ? 'Die Startseite wurde in einem anderen Fenster geändert.' : 'Die Menübelegung wurde in einem anderen Fenster geändert.'}); return; } next(); };
     };
     if (guard) {
       /* Bestandskennung zuerst lesen; erst wenn sie stimmt, wird geschrieben */
@@ -416,9 +416,10 @@ export function replaceAll(next, files, info){
     };
     tx.onabort = () => { if (!done) reject(injected || mapErr(tx.error || {name: 'AbortError'})); };
     const old = {};
-    let pending = REC.length + 3, existing = new Map(), oldNavigation = null, oldTracks = null;
+    let pending = REC.length + 4, existing = new Map(), oldNavigation = null, oldTracks = null, oldDashboard = null;
     const nr = tx.objectStore('meta').get('navigation'); nr.onsuccess = () => { oldNavigation = nr.result || null; step(); };
     const tr = tx.objectStore('meta').get('tracks'); tr.onsuccess = () => { oldTracks = tr.result || null; step(); };   /* ab 1.13.0 */
+    const dr = tx.objectStore('meta').get('dashboard'); dr.onsuccess = () => { oldDashboard = dr.result || null; step(); };   /* ab 1.14.0 */
     REC.forEach(s => { const r = tx.objectStore(s).getAll(); r.onsuccess = () => { old[s] = r.result; step(); }; });
     const fr = tx.objectStore('files').getAll();
     fr.onsuccess = () => { fr.result.forEach(f => existing.set(f.id, f)); step(); };
@@ -431,12 +432,13 @@ export function replaceAll(next, files, info){
           const ex = existing.get(f.id);
           if (ex && ex.sha256 && f.sha256 && ex.sha256 !== f.sha256) { injected = {code: 'conflict', message: f.id}; tx.abort(); return; }
         }
-        const had = REC.some(s => old[s].length) || !!oldNavigation || !!oldTracks;
+        const had = REC.some(s => old[s].length) || !!oldNavigation || !!oldTracks || !!oldDashboard;
         const snapStore = tx.objectStore('snapshots');
         if (had && info.snapshot !== false) {
           const fileIds = info.refsOf ? Array.from(info.refsOf(old)) : [];
           const snap = {id: 'vor-ersetzen', created: Date.now(), reason: info.reason || 'Ersetzen', data: old, navigation: oldNavigation, fileIds};
           if (oldTracks) snap.tracks = oldTracks;
+          if (oldDashboard) snap.dashboard = oldDashboard;   /* ab 1.14.0: nur mit eigener Auswahl der Startseite */
           snapStore.put(snap); res.snapshot = {created: snap.created, counts: REC.reduce((a, s) => { a[s] = old[s].length; return a; }, {})};
         } else if (info.dropSnapshot) snapStore.delete('vor-ersetzen');   /* ab 1.10.0: Wiederherstellungspunkte bleiben */
         let n = 0;
@@ -460,6 +462,7 @@ export function replaceAll(next, files, info){
           if (info.meta) info.meta.forEach(m => ms.put(m));
           if (info.navigation) ms.put(info.navigation); else ms.delete('navigation');
           if (info.tracks) ms.put(info.tracks); else ms.delete('tracks');   /* ab 1.13.0: Lieblingsstrecken gehören zum Bestand */
+          if (info.dashboard) ms.put(info.dashboard); else ms.delete('dashboard');   /* ab 1.14.0: Auswahl der Startseite ebenso */
           if (info.importSeq) {
             /* Eine frisch eingespielte Sicherung gilt als gesichert: Stand = Sicherung */
             const b = {k: 'backup', at: info.importSeq.at, seq: i.changeSeq, name: info.importSeq.name, size: info.importSeq.size, how: 'import', epoch: i.epoch};
@@ -503,11 +506,12 @@ export function takePoint(opts){
     tx.oncomplete = () => { done = true; resolve(res); };
     tx.onabort = () => { if (!done) reject(injected || mapErr(tx.error || {name: 'AbortError'})); };
     const data = {};
-    let info = null, nav = null, trk = null, snaps = [], files = [], pending = REC.length + 5;
+    let info = null, nav = null, trk = null, dsh = null, snaps = [], files = [], pending = REC.length + 6;
     REC.forEach(s => { const r = tx.objectStore(s).getAll(); r.onsuccess = () => { data[s] = r.result; step(); }; });
     const ri = tx.objectStore('meta').get('info'); ri.onsuccess = () => { info = ri.result || null; step(); };
     const rn = tx.objectStore('meta').get('navigation'); rn.onsuccess = () => { nav = rn.result || null; step(); };
     const rt = tx.objectStore('meta').get('tracks'); rt.onsuccess = () => { trk = rt.result || null; step(); };   /* ab 1.13.0 */
+    const rd = tx.objectStore('meta').get('dashboard'); rd.onsuccess = () => { dsh = rd.result || null; step(); };   /* ab 1.14.0 */
     const rs = tx.objectStore('snapshots').getAll(); rs.onsuccess = () => { snaps = rs.result; step(); };
     const rf = tx.objectStore('files').getAll(); rf.onsuccess = () => { files = rf.result; step(); };
     function step(){
@@ -516,11 +520,11 @@ export function takePoint(opts){
         const now = opts.now || Date.now();
         const epoch = info && typeof info.epoch === 'string' ? info.epoch : '';
         const seq = info ? info.changeSeq || 0 : 0;
-        if (!REC.some(s => data[s].length) && !nav && !trk) { res = {result: 'empty'}; return; }
+        if (!REC.some(s => data[s].length) && !nav && !trk && !dsh) { res = {result: 'empty'}; return; }
         const mine = snaps.filter(s => isPoint(s) && s.epoch === epoch).sort((a, b) => b.created - a.created);
         /* Derselbe Stand (z. B. aus einem anderen Fenster schon abgelegt): kein zweiter Punkt */
         const stale = staleMs();
-        const same = mine.find(s => s.changeSeq === seq && canon(s.navigation || null) === canon(nav) && canon(s.tracks || null) === canon(trk) && (s.verified || now - s.created < stale));
+        const same = mine.find(s => s.changeSeq === seq && canon(s.navigation || null) === canon(nav) && canon(s.tracks || null) === canon(trk) && canon(s.dashboard || null) === canon(dsh) && (s.verified || now - s.created < stale));
         /* ab Prüfbefund PR #24: ein noch nicht geprüfter Punkt desselben Stands → 'pending' mit Zeitpunkt, ab dem er als liegengeblieben gilt */
         if (same) { res = same.verified ? {result: 'same'} : {result: 'pending', next: same.created + stale}; return; }
         /* Mindestabstand ab dem letzten geprüften oder noch laufenden Punkt; ein liegengebliebener (ungeprüft, älter als die Frist)
@@ -534,6 +538,7 @@ export function takePoint(opts){
         const p = {id: 'punkt-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 8), kind: 'punkt', created: now, epoch, changeSeq: seq,
           data, navigation: nav, fileIds: fl.map(f => f.id), files: fl, missing, verified: false, sum: ''};
         if (trk) p.tracks = trk;   /* ab 1.13.0: nur wenn markiert – ältere Punkte bleiben unverändert gültig */
+        if (dsh) p.dashboard = dsh;   /* ab 1.14.0: nur mit eigener Auswahl der Startseite – ebenso */
         if (t && t.pointQuota) { if (t.pointQuota !== 'always') t.pointQuota = false; injected = {code: 'quota_exceeded', message: 'Test: Speicher voll'}; tx.abort(); return; }
         if (t && t.pointAbort) { t.pointAbort = false; injected = {code: 'aborted', message: 'Test: Schreibvorgang unterbrochen'}; tx.abort(); return; }
         tx.objectStore('snapshots').put(p);
