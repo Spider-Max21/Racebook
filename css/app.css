@@ -346,6 +346,10 @@ table.int td.n input{width:78px}
 .manual{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .doc-icon{width:46px;height:58px;border:2px solid var(--line);border-radius:4px 12px 4px 4px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;font:700 12px var(--f-cond);color:var(--muted);background:var(--surface-2);flex:none}
 .swatch{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;border:1px solid var(--line);margin-right:6px}
+/* ab 1.15.0 (Issue #7): Fahrgestellnummer – ganz markierbar, bricht auf schmalen Bildschirmen um */
+.vin{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.04em;user-select:all;-webkit-user-select:all;overflow-wrap:anywhere;word-break:break-all}
+.vin-in{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.04em;text-transform:uppercase}
+.vin-note:empty{display:none}
 .danger-zone{border-top:1px solid var(--line);padding-top:12px;margin-top:4px}
 .help{display:flex;flex-direction:column;gap:12px;font-size:15px;max-width:68ch}
 .help b{font-weight:600}

@@ -5,7 +5,8 @@ import {esc, str, fmt, eur, uid, v2, validId, safeUrl, turns, isISO, todayISO, f
 import {S, lsSet, lsJSON, bikeList, curBike, U, bikeName} from '../state.js';
 import {CHECK, GROUNDS, WEATHER, FLUIDS, MONTHS, LIM, MAX_COST, BRANDS, BRAND_LIST, KW, INAMES, TEMPLATES, MODELS, MODEL_TPL, SF,
   brandOf, colorOf, plateOf, shortName, curOf, totOf, offOf, posAt, itemState, pillText, sortedItems, svcAtOf, valueAt, hasSetOn,
-  serviceDoc, rideDoc, noteDoc, snapOf, sigOf, localParse, quickKindText, openDefects, DEFECT_PRIOS, canonDoc, mountTot, ambList, meterSegments, derive, dateOfMs, serviceAt} from '../domain.js';
+  serviceDoc, rideDoc, noteDoc, snapOf, sigOf, localParse, quickKindText, openDefects, DEFECT_PRIOS, canonDoc, mountTot, ambList, meterSegments, derive, dateOfMs, serviceAt,
+  normVin, vinValid, vinNote, VIN_MAX} from '../domain.js';
 
 import * as store from '../store.js';
 import {opFor, parkOp, execOp, bumpGen, lowCheck, addUnres, BIKE_FORMS, cleanupFiles, payloadFiles, flow, reconcile} from '../ops.js';
@@ -494,11 +495,41 @@ function addBikeHTML(){
     + '<div class="f"><label for="abModel">Modell</label><input id="abModel" list="abModels" autocomplete="off" placeholder="tippen oder wählen"><datalist id="abModels"></datalist></div>'
     + '<div class="f"><label for="abYear">Baujahr</label><input id="abYear" inputmode="numeric" autocomplete="off"></div>'
     + '<div class="f full"><label for="abNick">Spitzname (optional)</label><input id="abNick" maxlength="40" autocomplete="off" placeholder="z. B. Die Orange"></div>'
+    + vinFieldHTML('abVin', '')
     + '<div class="f full"><label for="abTpl">Wartungspunkte vorbelegen</label><select id="abTpl">' + tpl + '</select></div>'
     + '<div class="f full"><label for="abUnit">Zählt nach</label><select id="abUnit"><option value="h">Betriebsstunden</option><option value="km">Kilometern</option></select></div>'
     + '<div class="f full"><span class="lbl" id="abPhotoLbl">Foto (optional)</span><div class="photo-pick" id="abPhotoBox">' + addPhotoInner() + '</div></div>'
     + '<p class="hint full">Die Vorlagen sind Richtwerte, keine Herstellerangaben. Du kannst alles später unter Wartung → Intervalle verwalten anpassen.</p>'
     + '<div class="f full"><button class="btn primary" type="submit">Motorrad anlegen</button></div></form></div>';
+}
+/* ---------- Fahrgestellnummer (ab 1.15.0, Issue #7) ----------
+   Optionales Feld in den Stammdaten. Frei mit Hinweis: Leerzeichen werden beim Speichern entfernt, Buchstaben groß geschrieben;
+   Buchstaben, Ziffern und Bindestrich; eine Nummer, die nicht der heutigen Norm entspricht, wird nach einem Hinweis trotzdem
+   gespeichert. Nur auf diesem Gerät und in der Sicherung; sie erscheint nur in den Fahrzeugdaten. */
+const VIN_HELP = 'Steht im Fahrzeugschein (Feld E) und am Rahmen. Hilft im Fall eines Diebstahls. Wird nur auf diesem Gerät und in deiner Sicherung gespeichert.';
+function vinFieldHTML(id, value){
+  return '<div class="f full"><label for="' + id + '">Fahrgestellnummer (FIN, optional)</label><input id="' + id + '" class="vin-in" data-vin maxlength="' + (VIN_MAX + 10) + '" autocomplete="off" autocapitalize="characters" spellcheck="false" value="' + esc(value || '') + '" aria-describedby="' + id + 'Help ' + id + 'Note">'
+    + '<p class="hint" id="' + id + 'Help">' + esc(VIN_HELP) + '</p><p class="hint vin-note" id="' + id + 'Note" aria-live="polite">' + esc(vinNote(normVin(value))) + '</p></div>';
+}
+/* gelesene Eingabe: leer → '', sonst die zu speichernde Schreibweise; ungültige Zeichen → Fehler am Feld, Eingabe bleibt */
+function readVin(id){
+  const el = $('#' + id), v = normVin(el ? el.value : '');
+  if (v && !vinValid(v)) throw new VErr(el, 'Die Fahrgestellnummer darf nur Buchstaben, Ziffern und Bindestriche enthalten, höchstens ' + VIN_MAX + ' Zeichen, nicht mit einem Bindestrich am Anfang oder Ende.');
+  return v;
+}
+function vinShowHTML(b){
+  if (!b.vin) return '–';
+  return '<span class="vin" id="vinShow">' + esc(b.vin) + '</span> <button class="mini" type="button" id="vinCopy" aria-label="Fahrgestellnummer kopieren">' + icon('copy') + 'Kopieren</button>';
+}
+/* Kopieren: über die Zwischenablage; geht das nicht (älterer Browser, keine Berechtigung), wird die Nummer markiert */
+async function copyVin(b){
+  if (!b || !b.vin) return;
+  try { await navigator.clipboard.writeText(b.vin); toast('Fahrgestellnummer kopiert.'); }
+  catch (e) {
+    const el = $('#vinShow');
+    if (el) { const rg = document.createRange(); rg.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); }
+    toast('Kopieren ging nicht automatisch. Die Nummer ist markiert – halte sie gedrückt und wähle „Kopieren“.');
+  }
 }
 function addPhotoInner(){
   const a = S.addPhoto;
@@ -1191,7 +1222,7 @@ function renderGarage(){
   const u = U(b);
   if (!S.editing.bike) {
     const c = colorOf(b);
-    $('#bikeBody').innerHTML = bikePhotoHTML(b) + '<dl class="kv" style="margin-top:12px"><dt>Spitzname</dt><dd>' + esc(b.nickname || '–') + '</dd><dt>Marke</dt><dd>' + esc(b.brand || '–') + '</dd><dt>Modell</dt><dd>' + esc(b.model || '–') + '</dd><dt>Baujahr</dt><dd>' + esc(b.year || '–') + '</dd><dt>Farbe</dt><dd><span class="swatch" style="background:' + c + '"></span>' + esc(c.toUpperCase()) + '</dd><dt>Zählt nach</dt><dd>' + (u === 'km' ? 'Kilometern' : 'Betriebsstunden') + '</dd></dl>';
+    $('#bikeBody').innerHTML = bikePhotoHTML(b) + '<dl class="kv" style="margin-top:12px"><dt>Spitzname</dt><dd>' + esc(b.nickname || '–') + '</dd><dt>Marke</dt><dd>' + esc(b.brand || '–') + '</dd><dt>Modell</dt><dd>' + esc(b.model || '–') + '</dd><dt>Baujahr</dt><dd>' + esc(b.year || '–') + '</dd><dt>Fahrgestellnummer</dt><dd>' + vinShowHTML(b) + '</dd><dt>Farbe</dt><dd><span class="swatch" style="background:' + c + '"></span>' + esc(c.toUpperCase()) + '</dd><dt>Zählt nach</dt><dd>' + (u === 'km' ? 'Kilometern' : 'Betriebsstunden') + '</dd></dl>';
     hydrate($('#bikeBody'));
   }
   if (!S.editing.tc) $('#tcBody').innerHTML = teile.cellsHTML(b, 'components', runtime);
@@ -1278,7 +1309,7 @@ export function renderBike(){
 /* ---------- Garage: Bearbeiten-Formulare ---------- */
 /* Bearbeiten unter Technik. src: anzuzeigende Werte (Standard: das Motorrad; nach einer Änderung in einem anderen Fenster
    der zusammengeführte Stand). Grundlage des Entwurfs (S.editBase) = gespeicherter Stand dieser Felder beim Öffnen. */
-const EDIT_FIELDS = {bike: ['brand', 'short', 'model', 'year', 'color', 'nickname'], tc: ['tires', 'chain'], oil: ['fluids'], int: ['items', 'unit'], oem: ['oem']};
+const EDIT_FIELDS = {bike: ['brand', 'short', 'model', 'year', 'color', 'nickname', 'vin'], tc: ['tires', 'chain'], oil: ['fluids'], int: ['items', 'unit'], oem: ['oem']};
 /* nz: zum Vergleichen (leer = nichts); nu: gespeicherter Wert unverändert (nur „fehlt“ = null), für die Prüfung im Speicher */
 const nz = v => v === undefined || v === '' ? null : v;
 const nu = v => v === undefined ? null : v;
@@ -1304,6 +1335,7 @@ function openEdit(key, src, msg){
       + '<div class="f full" id="ebOtherWrap"' + (known && brandOf(b).n !== 'Andere' ? ' hidden' : '') + '><label for="ebOther">Markenname</label><input id="ebOther" value="' + esc(known ? (brandOf(b).n === 'Andere' ? '' : b.brand) : b.brand) + '"></div>'
       + '<div class="f"><label for="ebModel">Modell</label><input id="ebModel" list="ebModels" autocomplete="off" value="' + esc(b.model || '') + '"><datalist id="ebModels">' + modelOptions(known ? brandOf(b).n : '') + '</datalist></div>'
       + '<div class="f"><label for="ebYear">Baujahr</label><input id="ebYear" inputmode="numeric" value="' + esc(b.year || '') + '"></div>'
+      + vinFieldHTML('ebVin', b.vin || '')
       + '<div class="f full row"><button class="btn primary" type="submit">Speichern</button><button class="btn ghost" type="button" data-cancel="bike">Abbrechen</button></div>'
       + '<div class="f full danger-zone"><button class="mini" type="button" id="bikeRemove" data-arm="Wirklich alles löschen?">Motorrad entfernen</button><p class="hint" style="margin-top:6px">Löscht das Motorrad mit allen Einträgen, Fahrten, Setups, Mängeln und Fotos. Lagerartikel bleiben mit ihrem Bestand erhalten; war das Motorrad ihre einzige Zuordnung, stehen sie danach auf „Zuordnung prüfen“. Mach vorher eine Sicherung, wenn du unsicher bist.</p></div></form>';
     if (warn) $('#bikeForm').insertAdjacentHTML('afterbegin', warn);
@@ -1355,7 +1387,7 @@ function closeEdit(key){ S.editing[key] = false; delete S.editBase[key]; drafts.
    gespeichert: Racebook führt die eigenen Änderungen mit dem aktuellen Stand zusammen, zeigt das Ergebnis im Formular und
    nennt echte Konflikte. Erst ein erneutes „Speichern“ übernimmt es. */
 const EDIT_MSG = 'Diese Daten wurden inzwischen in einem anderen Fenster geändert. Es wurde nichts gespeichert. Bitte prüfe den aktuellen Stand.';
-const FIELD_NAMES = {brand: 'Marke', short: 'Kurzname', model: 'Modell', year: 'Baujahr', color: 'Farbe', nickname: 'Spitzname', unit: 'Einheit', every: 'Intervall', months: 'Monate', lastAt: 'Startwert', lastDate: 'Startdatum', name: 'Name', at: 'Stand', date: 'Datum', front: 'Ritzel', rear: 'Kettenrad', links: 'Glieder', spec: 'Sorte', qty: 'Menge', rows: 'Herstellervorgaben', note: 'Hinweis', sourceTitle: 'Quelle', sourceUrl: 'Link zur Quelle'};
+const FIELD_NAMES = {brand: 'Marke', short: 'Kurzname', model: 'Modell', year: 'Baujahr', color: 'Farbe', nickname: 'Spitzname', vin: 'Fahrgestellnummer', unit: 'Einheit', every: 'Intervall', months: 'Monate', lastAt: 'Startwert', lastDate: 'Startdatum', name: 'Name', at: 'Stand', date: 'Datum', front: 'Ritzel', rear: 'Kettenrad', links: 'Glieder', spec: 'Sorte', qty: 'Menge', rows: 'Herstellervorgaben', note: 'Hinweis', sourceTitle: 'Quelle', sourceUrl: 'Link zur Quelle'};
 const showVal = v => v == null || v === '' ? 'leer' : typeof v === 'number' ? fmt(v, 2) : typeof v === 'string' ? '„' + v + '“' : 'geändert';
 /* Drei-Wege-Zusammenführung einzelner Felder: eigene Änderung (mine ≠ base) gewinnt, die des anderen Fensters bleibt
    sonst erhalten; wurde dasselbe Feld unterschiedlich geändert, ist es ein Konflikt (im Formular steht die eigene Eingabe) */
@@ -1643,7 +1675,12 @@ async function saveBikeEdit(b){
   const brand = (sel === 'Andere' ? (str($('#ebOther').value) || 'Andere') : sel).slice(0, 60);
   const year = fieldNum('ebYear', 'Baujahr', {int: true, min: 1900, max: new Date().getFullYear() + 1});
   const br = BRANDS.find(x => x.n === brand);
+  const vin = readVin('ebVin');
   const patch = {brand, short: br && br.short ? br.short : null, model: str($('#ebModel').value).slice(0, 80), year, color: $('#ebColor').value, nickname: str($('#ebNick').value).slice(0, 40)};
+  /* ab 1.15.0: Fahrgestellnummer nur schreiben, wenn eine eingetragen ist oder eine gespeicherte entfernt wird (Motorräder ohne
+     Nummer bleiben beim Speichern anderer Angaben unverändert) */
+  const raw0 = store.peek('bikes', b.id) || {};
+  if (vin || (raw0.vin != null && raw0.vin !== '')) patch.vin = vin || null;
   if (editStale('bike', b)) { rebaseEdit('bike', b, patch); return false; }
   if (await commitEdit('bike', b, patch)) { toast('Gespeichert.'); return true; }
   return false;
@@ -1674,13 +1711,14 @@ async function addBike(){
   const br = BRANDS.find(x => x.n === brand);
   const slug = brand.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'bike';
   const model = str($('#abModel').value).slice(0, 80), color = $('#abColor').value, nickname = str($('#abNick').value).slice(0, 40);
+  const vin = readVin('abVin');   /* ab 1.15.0 */
   const ph = S.addPhoto;
-  const o = opFor('addBikeForm', '', 'bikes', null, [brand, model, year, tk, unit, color, nickname, ph ? ph.photo.id : ''].join('|')); if (o.saving) return;
+  const o = opFor('addBikeForm', '', 'bikes', null, [brand, model, year, tk, unit, color, nickname, ph ? ph.photo.id : '', vin].join('|')); if (o.saving) return;
   if (!o.payload) {
     o.op = slug + '-' + o.op.slice(-6);
     const items = tpl.items.map(([k, every, months]) => ({id: k, name: INAMES[k], every: every || null, months: months || null, lastAt: null, lastDate: null, kw: KW[k]}));
     const order = bikeList().reduce((m, x) => Math.max(m, x.order == null ? 0 : x.order), -1) + 1;
-    o.payload = canonDoc('bikes', {brand, short: br && br.short ? br.short : null, nickname, photo: ph ? ph.photo : null, model, year, unit, current: null, currentT: null, color, order, items, fluids: {}, tires: {}, chain: {}, oem: {rows: []}, manual: null});
+    o.payload = canonDoc('bikes', Object.assign({brand, short: br && br.short ? br.short : null, nickname, photo: ph ? ph.photo : null, model, year, unit, current: null, currentT: null, color, order, items, fluids: {}, tires: {}, chain: {}, oem: {rows: []}, manual: null}, vin ? {vin} : {}));
     o.files = ph ? ph.files : null;
     o.label = 'Motorrad ' + brand + ' ' + model;
   }
@@ -1891,6 +1929,7 @@ async function storeBikePhoto(file, forAdd, bid, epoch, res){
 
 /* ---------- Ereignisse ---------- */
 export async function onClick(t){
+  if (t.id === 'vinCopy') { await copyVin(curBike()); return true; }   /* ab 1.15.0: Fahrgestellnummer kopieren */
   /* Ab 1.6.0: Beleg übernehmen */
   if (await beleg.onClick(t)) return true;
   if (await teile.onClick(t)) return true;   /* ab 1.7.0: Teilehistorie */
@@ -2086,6 +2125,7 @@ export function onInput(t){
     return true;
   }
   if (t.id === 'hoursInput') { hoursReset(); return true; }
+  if (t.dataset && t.dataset.vin != null) { const n = $('#' + t.id + 'Note'); if (n) n.textContent = vinNote(normVin(t.value)); return true; }   /* ab 1.15.0 */
   if (S.doneDraft && t.closest && t.closest('#doneForm')) {
     if (t.id === 'dfAt') { S.doneDraft.atStr = t.value; if (S.ops.doneForm) delete S.ops.doneForm.confirmLow; }
     if (t.id === 'dfCost') S.doneDraft.costStr = t.value;

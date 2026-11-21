@@ -66,8 +66,11 @@ export const ZIP_FORMAT = 'racebook-backup';
    Lieblingsstrecken markiert sind (tracks, Roadmap 8). 1.12.x würde sie beim Einlesen still verwerfen; deshalb lehnt es Version 16 ab.
    Ab 1.14.0 Version 17, wenn eine eigene Auswahl der Startseite gespeichert ist (dashboard, Roadmap 11). 1.13.x würde sie beim
    Einlesen still verwerfen; deshalb lehnt es Version 17 ab.
-   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 bzw. 16. */
-export const ZIP_VERSION = 17;
+   Ab 1.15.0 Version 18, wenn ein Motorrad eine Fahrgestellnummer hat (vin, Issue #7). 1.14.x würde sie beim Einlesen still
+   verwerfen; deshalb lehnt es Version 18 ab.
+   Ohne solche Einträge schreibt die App weiter Version 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 bzw. 17. */
+export const ZIP_VERSION = 18;
+export const ZIP_VERSION_V17 = 17;
 export const ZIP_VERSION_V16 = 16;
 export const ZIP_VERSION_V15 = 15;
 export const ZIP_VERSION_V14 = 14;
@@ -119,6 +122,9 @@ export const hasV16Bike = b => !!b && typeof b === 'object' && Array.isArray(b.l
 export const hasV16Ride = r => !!r && typeof r === 'object' && ((r.layout != null && r.layout !== '') || r.turns != null);
 /* ab 1.14.0 (Roadmap 11): eigene Auswahl der Startseite (meta 'dashboard') */
 export const needsV17 = dashboard => !!dashboard;
+/* ab 1.15.0 (Issue #7): Fahrgestellnummer am Motorrad (vin) */
+export const hasV18Bike = b => !!b && typeof b === 'object' && typeof b.vin === 'string' && b.vin !== '';
+export const needsV18 = next => Object.values((next && next.bikes) || {}).some(hasV18Bike);
 export const needsV16 = (next, tracks) => !!tracks || Object.values((next && next.bikes) || {}).some(hasV16Bike) || Object.values((next && next.rides) || {}).some(hasV16Ride);
 /* Bereiche, deren Einträge zu einem Motorrad gehören; Teile auch zu 'both' */
 export const DEP_COLLS = ['log', 'rides', 'setups', 'defects', 'parts'];
@@ -236,6 +242,23 @@ export function H(strict, where){
     fail
   };
 }
+/* ---------- Fahrgestellnummer (ab 1.15.0, Issue #7) ----------
+   Frei mit Hinweis (Auftrag von Max vom 21.11.2026): Buchstaben, Ziffern und Bindestrich (ältere Rahmennummern, z. B. japanische,
+   enthalten ihn), Leerzeichen werden entfernt, Kleinbuchstaben groß geschrieben, höchstens VIN_MAX Zeichen. Eine Nummer, die nicht
+   der heutigen Norm entspricht (17 Zeichen ohne I, O, Q), wird trotzdem gespeichert; dazu erscheint nur ein Hinweis (vinNote).
+   Nichts wird erfunden, ergänzt oder aus anderen Angaben abgeleitet. */
+export const VIN_MAX = 30;
+export const normVin = v => String(v == null ? '' : v).toUpperCase().replace(/\s+/g, '');
+export const vinValid = v => typeof v === 'string' && v.length <= VIN_MAX && /^[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?$/.test(v);
+export const vinStandard = v => typeof v === 'string' && /^[A-HJ-NPR-Z0-9]{17}$/.test(v);
+export const VIN_NOTE = 'Eine Fahrgestellnummer nach heutiger Norm hat 17 Zeichen ohne I, O und Q. Ältere Rahmennummern können anders aussehen – vergleich die Nummer mit dem Fahrzeugschein oder dem Rahmen. Gespeichert wird sie trotzdem.';
+export const vinNote = v => v && !vinStandard(v) ? VIN_NOTE : '';
+/* gespeicherte Form: nur gültig und bereits in der gespeicherten Schreibweise; sonst beim Einlesen ein Fehler (nichts still ändern) */
+function cleanVin(v, h){
+  if (typeof v !== 'string') { h.fail('Fahrgestellnummer', 'ist kein Text.'); return null; }
+  if (!vinValid(v) || normVin(v) !== v) { h.fail('Fahrgestellnummer', 'ist ungültig (nur Großbuchstaben, Ziffern und Bindestrich, ohne Leerzeichen, höchstens ' + VIN_MAX + ' Zeichen).'); return null; }
+  return v;
+}
 export function cleanBike(x, strict, where){
   const h = H(strict, where); x = h.o(x, 'Eintrag');
   const seen = new Set();
@@ -285,10 +308,13 @@ export function cleanBike(x, strict, where){
     ...(x.hist != null ? {hist: cleanHist(x.hist, h)} : {}),
     ...(x.acc != null ? {acc: cleanAcc(x.acc, h)} : {}),
     ...(x.laps != null ? {laps: cleanLaps(x.laps, h)} : {}),
+    ...vinPart(x.vin, h),
     oem: {rows: h.a(oem.rows, 'Herstellervorgaben').filter(r => r && typeof r === 'object').slice(0, 50).map(r => ({when: h.s(r.when, 'Herstellervorgabe', {max:60}), what: h.s(r.what, 'Herstellervorgabe', {max:300})})), note: h.s(oem.note, 'Hinweis', {max:2000}), sourceTitle: h.s(oem.sourceTitle, 'Quelle', {max:200}), sourceUrl: safeUrl(oem.sourceUrl)},
     manual
   };
 }
+/* ab 1.15.0: Fahrgestellnummer nur, wenn vorhanden (Motorräder ohne Nummer bleiben exakt gleich; gelöscht = kein Feld) */
+function vinPart(v, h){ if (v == null || v === '') return {}; const c = cleanVin(v, h); return c ? {vin: c} : {}; }
 /* Ab 1.2.0, nur wenn vorhanden (bestehende Motorräder bleiben exakt gleich):
    checklist = eigene Liste „Vor der Fahrt“ [{id, name}], favs = Lieblings-Tätigkeiten (IDs aus dem Katalog oder eigene) */
 function cleanBikeV8(x, h){
@@ -1258,6 +1284,7 @@ export function validateZipJson(d){
   if (d.version < 11 && teile.some(hasV11Part)) throw new Error('Die Sicherung ist beschädigt (Mehrfachzuordnung oder Einkaufspreise in einer Sicherung vor Version 11).');
   if (d.version < 12 && teile.some(hasV12Part)) throw new Error('Die Sicherung ist beschädigt (Einkäufe aus Rechnungsfotos in einer Sicherung vor Version 12).');
   if (d.version < 17 && d.dashboard != null) throw new Error('Die Sicherung ist beschädigt (Auswahl der Startseite in einer Sicherung vor Version 17).');
+  if (d.version < 18 && (Array.isArray(d.motorraeder) ? d.motorraeder : []).some(hasV18Bike)) throw new Error('Die Sicherung ist beschädigt (Fahrgestellnummer in einer Sicherung vor Version 18).');
   const navigation = navigationOf(d.navigation);
   const tracks = tracksOf(d.tracks);
   const dashboard = dashboardOf(d.dashboard);

@@ -5,11 +5,11 @@
 import * as DB from './db.js';
 import {makeZip, readZip, isZip} from './zip.js';
 import {sha256, sniff} from './images.js';
-import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans, needsV6, needsV7, needsV8, needsV10, needsV11, needsV12, needsV13, needsV14, needsV15, needsV16, needsV17, ZIP_FORMAT, ZIP_VERSION, ZIP_VERSION_V16, ZIP_VERSION_V15, ZIP_VERSION_V14, ZIP_VERSION_V13, ZIP_VERSION_V12, ZIP_VERSION_V11, ZIP_VERSION_V10, ZIP_VERSION_NAV, ZIP_VERSION_V8, ZIP_VERSION_POS, ZIP_VERSION_METER, ZIP_VERSION_ORPH, ZIP_VERSION_PLAIN, DEP_COLLS, KEYS, NAMES} from './domain.js';
+import {validateZipJson, validateV8Backup, fileRefs, splitOrphans, mergeOrphans, needsV6, needsV7, needsV8, needsV10, needsV11, needsV12, needsV13, needsV14, needsV15, needsV16, needsV17, needsV18, ZIP_FORMAT, ZIP_VERSION, ZIP_VERSION_V17, ZIP_VERSION_V16, ZIP_VERSION_V15, ZIP_VERSION_V14, ZIP_VERSION_V13, ZIP_VERSION_V12, ZIP_VERSION_V11, ZIP_VERSION_V10, ZIP_VERSION_NAV, ZIP_VERSION_V8, ZIP_VERSION_POS, ZIP_VERSION_METER, ZIP_VERSION_ORPH, ZIP_VERSION_PLAIN, DEP_COLLS, KEYS, NAMES} from './domain.js';
 import {COLLS} from './state.js';
 import {pad, canon, isISO, fmtDate} from './util.js';
 
-export const APP_VERSION = '1.14.0';
+export const APP_VERSION = '1.15.0';
 export const V8_LOCAL_KEY = 'wh-garage-local';
 const MAX_JSON = 60 * 1024 * 1024;
 const enc = new TextEncoder();
@@ -52,7 +52,7 @@ export async function buildBackup(){
   const nav = (recs.meta || []).find(m => m.k === 'navigation') || null;
   const trk = (recs.meta || []).find(m => m.k === 'tracks') || null;   /* ab 1.13.0: Lieblingsstrecken */
   const dsh = (recs.meta || []).find(m => m.k === 'dashboard') || null;   /* ab 1.14.0: Auswahl der Startseite */
-  const json = {format: ZIP_FORMAT, version: needsV17(dsh) ? ZIP_VERSION : needsV16(next, trk) ? ZIP_VERSION_V16 : needsV15(next) ? ZIP_VERSION_V15 : needsV14(next) ? ZIP_VERSION_V14 : needsV13(next) ? ZIP_VERSION_V13 : needsV12(next) ? ZIP_VERSION_V12 : needsV11(next) ? ZIP_VERSION_V11 : needsV10(next) ? ZIP_VERSION_V10 : nav ? ZIP_VERSION_NAV : needsV8(next) ? ZIP_VERSION_V8 : needsV7(next) ? ZIP_VERSION_POS : needsV6(next) ? ZIP_VERSION_METER : sp.count ? ZIP_VERSION_ORPH : ZIP_VERSION_PLAIN, app: APP_VERSION, exportiert: now.toISOString(), stand: {changeSeq: info.changeSeq || 0}};
+  const json = {format: ZIP_FORMAT, version: needsV18(next) ? ZIP_VERSION : needsV17(dsh) ? ZIP_VERSION_V17 : needsV16(next, trk) ? ZIP_VERSION_V16 : needsV15(next) ? ZIP_VERSION_V15 : needsV14(next) ? ZIP_VERSION_V14 : needsV13(next) ? ZIP_VERSION_V13 : needsV12(next) ? ZIP_VERSION_V12 : needsV11(next) ? ZIP_VERSION_V11 : needsV10(next) ? ZIP_VERSION_V10 : nav ? ZIP_VERSION_NAV : needsV8(next) ? ZIP_VERSION_V8 : needsV7(next) ? ZIP_VERSION_POS : needsV6(next) ? ZIP_VERSION_METER : sp.count ? ZIP_VERSION_ORPH : ZIP_VERSION_PLAIN, app: APP_VERSION, exportiert: now.toISOString(), stand: {changeSeq: info.changeSeq || 0}};
   COLLS.forEach(c => { json[KEYS[c]] = (recs[c] || []).filter(d => c === 'bikes' || sp.clean[c][d.id]).sort(byId); });
   if (sp.count) {
     json.verwaist = {};
